@@ -9,4 +9,4 @@ buf = Buffer(b"This is my buffer")
 buf.incref()
 print(buf.checksum)
 
-asyncio.run(asyncio.sleep(3))
+asyncio.run(asyncio.sleep(1))

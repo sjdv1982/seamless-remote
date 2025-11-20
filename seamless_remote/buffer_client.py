@@ -54,6 +54,7 @@ class BufferClient:
     readonly: bool
     url: Optional[str] = None
     directory: Optional[str] = None
+    _shutdown = False
 
     def __init__(self, readonly: bool):
         self.readonly = readonly
@@ -69,13 +70,45 @@ class BufferClient:
         if self.url is None and self.directory is None:
             raise ValueError("Provide at least a url or directory")
 
-    async def _wait_for_init(self):
+    async def _wait_for_init(self, *, skip_healthcheck: bool = False):
         if self._initialized:
             return
         await self._init()
         self._validate_init()
-        await self.healthcheck()
+        if not skip_healthcheck and not self._shutdown:
+            await self.healthcheck()
         self._initialized = True
+
+    def ensure_initialized_sync(self, *, skip_healthcheck: bool = False):
+        """Synchronously ensure initialization."""
+        if self._initialized:
+            return
+
+        async def _do():
+            await self._wait_for_init(skip_healthcheck=skip_healthcheck)
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is None or loop.is_closed():
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_do())
+            finally:
+                try:
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                except Exception:
+                    pass
+                loop.close()
+            return
+
+        if loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(_do(), loop)
+            return future.result()
+
+        loop.run_until_complete(_do())
 
     def _require_url(self) -> str:
         if self.url is None:
@@ -243,8 +276,23 @@ class BufferClient:
         for session in sessions:
             _close_session(session)
 
+    def _close_sessions_for_thread(self, thread: threading.Thread):
+        """Close the session that belongs to the provided thread, if any."""
+        session = self._sessions.pop(thread, None)
+        if session is not None:
+            _close_session(session)
+
 
 def _close_all_clients():
+    try:
+        from seamless.caching import buffer_writer
+    except Exception:
+        buffer_writer = None
+    else:
+        try:
+            buffer_writer.flush(timeout=30.0)
+        except Exception:
+            pass
     for client in list(_clients):
         client._close_sessions()
 
@@ -271,7 +319,7 @@ class BufferLaunchedClient(BufferClient):
         )
         self.local = "hostname" not in self.launch_config
 
-    async def _init(self):
+    def _do_init(self):
         import remote_http_launcher
 
         conf = self.launch_config
@@ -291,6 +339,16 @@ class BufferLaunchedClient(BufferClient):
         self.url = url
         self.directory = directory
 
+    async def _init(self):
+        self._do_init()
+
+    def ensure_initialized_sync(self):
+        """Synchronously ensure initialization."""
+        if self._initialized:
+            return
+        self._do_init()
+        self._initialized = True
+
 
 atexit.register(_close_all_clients)
 
@@ -299,8 +357,8 @@ def _close_session(session: aiohttp.ClientSession) -> None:
     """Close a session on the event loop it belongs to."""
     loop = getattr(session, "_loop", None)
     if loop is None or loop.is_closed():
+        _finalize_session_without_loop(session)
         return
-    coro = session.close()
 
     try:
         running_loop = asyncio.get_running_loop()
@@ -308,6 +366,7 @@ def _close_session(session: aiohttp.ClientSession) -> None:
         running_loop = None
 
     if loop is running_loop:
+        coro = session.close()
         if loop.is_running():
             loop.create_task(coro)
         else:
@@ -315,6 +374,7 @@ def _close_session(session: aiohttp.ClientSession) -> None:
         return
 
     if loop.is_running():
+        coro = session.close()
         fut = asyncio.run_coroutine_threadsafe(coro, loop)
         try:
             fut.result()
@@ -324,6 +384,26 @@ def _close_session(session: aiohttp.ClientSession) -> None:
 
     thread_id = getattr(loop, "_thread_id", None)
     if thread_id == threading.get_ident():
+        coro = session.close()
         loop.run_until_complete(coro)
         return
-    # Loop is stopped and owned by another thread; nothing to do safely
+    # Loop is stopped and owned by another thread; try best-effort close
+    _finalize_session_without_loop(session)
+
+
+def _finalize_session_without_loop(session: aiohttp.ClientSession) -> None:
+    """Best-effort close when the originating loop has already stopped."""
+    connector = getattr(session, "_connector", None)
+    if connector is not None:
+        close = getattr(connector, "_close", None)
+        if close is not None:
+            try:
+                close()
+            except Exception:
+                pass
+    detach = getattr(session, "detach", None)
+    if detach is not None:
+        try:
+            detach()
+        except Exception:
+            pass
