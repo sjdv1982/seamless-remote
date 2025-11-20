@@ -240,32 +240,8 @@ class BufferClient:
     def _close_sessions(self):
         sessions = list(self._sessions.values())
         self._sessions.clear()
-        if not sessions:
-            return
-
-        async def _close_all():
-            await asyncio.gather(*(session.close() for session in sessions))
-
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop is None or loop.is_closed():
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(_close_all())
-            finally:
-                loop.run_until_complete(loop.shutdown_asyncgens())
-                loop.close()
-            return
-
-        if loop.is_running():
-            for session in sessions:
-                loop.create_task(session.close())
-            return
-
-        loop.run_until_complete(_close_all())
+        for session in sessions:
+            _close_session(session)
 
 
 def _close_all_clients():
@@ -317,3 +293,37 @@ class BufferLaunchedClient(BufferClient):
 
 
 atexit.register(_close_all_clients)
+
+
+def _close_session(session: aiohttp.ClientSession) -> None:
+    """Close a session on the event loop it belongs to."""
+    loop = getattr(session, "_loop", None)
+    if loop is None or loop.is_closed():
+        return
+    coro = session.close()
+
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
+    if loop is running_loop:
+        if loop.is_running():
+            loop.create_task(coro)
+        else:
+            loop.run_until_complete(coro)
+        return
+
+    if loop.is_running():
+        fut = asyncio.run_coroutine_threadsafe(coro, loop)
+        try:
+            fut.result()
+        except Exception:
+            pass
+        return
+
+    thread_id = getattr(loop, "_thread_id", None)
+    if thread_id == threading.get_ident():
+        loop.run_until_complete(coro)
+        return
+    # Loop is stopped and owned by another thread; nothing to do safely
