@@ -17,7 +17,11 @@ from frozendict import frozendict
 from seamless import Buffer, Checksum
 from seamless.util.pylru import lrucache
 
-from .client import Client, _retry_operation, close_all_clients as _close_all_base_clients
+from .client import (
+    Client,
+    _retry_operation,
+    close_all_clients as _close_all_base_clients,
+)
 
 
 class BufferClient(Client):
@@ -72,7 +76,7 @@ class BufferClient(Client):
         return result[0]
 
     @_retry_operation
-    async def get(self, checksum: Checksum) -> bytes | None:
+    async def get(self, checksum: Checksum) -> Buffer | None:
         """Download a buffer from the configured server."""
         session_async = self._get_session()
         checksum = Checksum(checksum)
@@ -81,10 +85,13 @@ class BufferClient(Client):
         while 1:
             path = self._require_url() + "/" + str(checksum)
             async with session_async.get(path) as response:
+                if int(response.status) == 404:
+                    return None
                 if int(response.status / 100) in (4, 5):
                     raise ClientConnectionError()
-                buf = await response.read()
-            buf_checksum = Buffer(buf).get_checksum().hex()
+                buf0 = await response.read()
+                buf = Buffer(buf0)
+            buf_checksum = buf.get_checksum().hex()
             if buf_checksum != checksum:
                 if buf_checksum != curr_buf_checksum:
                     curr_buf_checksum = buf_checksum
@@ -99,7 +106,7 @@ class BufferClient(Client):
             return buf
 
     @_retry_operation
-    async def write(self, checksum: Checksum, buffer: Buffer | bytes):
+    async def write(self, checksum: Checksum, buffer: Buffer):
         """Upload a buffer to the configured server."""
         if self.readonly:
             raise AttributeError("Read-only buffer client")
@@ -158,6 +165,7 @@ class BufferClient(Client):
                 return None
             return buf
         return None
+
 
 def _close_all_clients():
     try:

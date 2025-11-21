@@ -1,6 +1,8 @@
 """Module to obtain buffers from remote sources:
 - Buffer read servers
 - Buffer read folders
+and to write to them
+- Buffer write servers
 """
 
 import traceback
@@ -45,6 +47,12 @@ def define_extern_client(
         assert readonly
         client = BufferClient(True)
         client.directory = directory
+    elif type_ == "urlmap":
+        raise NotImplementedError
+    elif type_ == "foldermap":
+        raise NotImplementedError
+    elif type_ == "git-lfs-server":
+        raise NotImplementedError
     else:
         raise TypeError(type_)
     _extern_clients[name] = client
@@ -137,16 +145,19 @@ async def get_buffer(checksum: Checksum) -> Buffer | None:
         if buf is not None:
             return buf
 
-        for client in _read_server_clients:
-            buf = await client.get(checksum)
-            if buf is not None:
-                return buf
+    for client in _read_server_clients:
+        buf = await client.get(checksum)
+        if buf is not None:
+            return buf
 
 
 async def get_filename(checksum: Checksum) -> str | None:
     """Get the filename where a buffer is stored.
     This can only be provided by a buffer read folder.
     All buffer read folders are queried in order."""
+    raise NotImplementedError
+
+    """
     checksum = Checksum(checksum)
     if not checksum:
         return None
@@ -157,10 +168,11 @@ async def get_filename(checksum: Checksum) -> str | None:
         if aiofiles.os.path.exists(filename):
             return filename
     return None
+    """
 
 
 async def write_buffer(checksum: Checksum, buffer: Buffer) -> bool:
-    """Write the buffer to the buffer write server, if one exists."""
+    """Write the buffer to the buffer write servers, if one or more exist."""
     checksum = Checksum(checksum)
     """
     if checksum in _written_buffers:
@@ -169,6 +181,7 @@ async def write_buffer(checksum: Checksum, buffer: Buffer) -> bool:
     """
     # print("WRITE BUFFER", checksum.hex())
 
+    # TODO: do this in parallel
     written = False
     for client in _write_server_clients:
         if await client.buffer_length(checksum):
