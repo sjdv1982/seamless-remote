@@ -10,6 +10,11 @@ from typing import Any, Awaitable, Callable, Optional, TypeVar, cast
 
 import aiohttp
 from aiohttp import ClientConnectionError, ClientPayloadError
+from seamless.caching.fork_handler import (
+    register_after_fork_child_subhook,
+    register_after_fork_parent_subhook,
+    register_before_fork_subhook,
+)
 
 RETRYABLE_EXCEPTIONS = (
     ClientConnectionError,
@@ -19,6 +24,10 @@ RETRYABLE_EXCEPTIONS = (
 )
 
 _clients = weakref.WeakSet()
+_keepalive_loop: Optional[asyncio.AbstractEventLoop] = None
+_keepalive_thread: Optional[threading.Thread] = None
+_keepalive_stop_event: Optional[asyncio.Event] = None
+_keepalive_lock = threading.RLock()
 
 F = TypeVar("F", bound=Callable[..., Awaitable[Any]])
 
@@ -54,6 +63,7 @@ class Client:
         self._initialized = False
         self._sessions = weakref.WeakKeyDictionary()
         _clients.add(self)
+        _ensure_keepalive_worker()
 
     async def _init(self):
         """Subclasses should override with initialization logic."""
@@ -184,7 +194,7 @@ def _close_session(session: aiohttp.ClientSession) -> None:
         coro = session.close()
         fut = asyncio.run_coroutine_threadsafe(coro, loop)
         try:
-            fut.result()
+            fut.result(timeout=0.05)
         except Exception:
             pass
         return
@@ -214,6 +224,128 @@ def _finalize_session_without_loop(session: aiohttp.ClientSession) -> None:
             detach()
         except Exception:
             pass
+
+
+# --- keepalive worker --------------------------------------------------------
+# Purposefully keeps remote clients warm by periodically hitting /healthcheck;
+# success is irrelevant, it just prevents idle timeouts.
+def _ensure_keepalive_worker() -> None:
+    """Ensure background keepalive thread is running."""
+    global _keepalive_thread, _keepalive_loop, _keepalive_stop_event
+    with _keepalive_lock:
+        thread = _keepalive_thread
+        if thread is not None and thread.is_alive():
+            return
+        worker = threading.Thread(
+            target=_keepalive_thread_main,
+            name="SeamlessRemoteClientKeepalive",
+            daemon=True,
+        )
+        _keepalive_thread = worker
+    worker.start()
+
+
+def _stop_keepalive_worker() -> None:
+    global _keepalive_thread, _keepalive_loop, _keepalive_stop_event
+    thread = None
+    with _keepalive_lock:
+        loop = _keepalive_loop
+        stop_event = _keepalive_stop_event
+        thread = _keepalive_thread
+    if loop is None or stop_event is None or thread is None:
+        return
+
+    def _request_stop() -> None:
+        if not stop_event.is_set():
+            stop_event.set()
+
+    loop.call_soon_threadsafe(_request_stop)
+    thread.join(timeout=10)
+    with _keepalive_lock:
+        _keepalive_thread = None
+        _keepalive_loop = None
+        _keepalive_stop_event = None
+
+
+async def _run_keepalive(stop_event: asyncio.Event) -> None:
+    """Periodically send healthchecks to keep remote clients alive."""
+    while True:
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=30.0)
+            break
+        except asyncio.TimeoutError:
+            await _perform_healthchecks()
+
+
+async def _perform_healthchecks() -> None:
+    """Send keepalive healthchecks; errors are ignored by design."""
+    tasks = []
+    client: Client
+    for client in list(_clients):
+        try:
+            assert isinstance(client, Client)
+        except AssertionError:
+            continue
+        if not client._initialized:
+            continue
+        if client._shutdown:
+            continue
+        tasks.append(asyncio.create_task(_ping_client(client)))
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _ping_client(client: Client) -> None:
+    try:
+        await client._wait_for_init(skip_healthcheck=True)
+        await client.healthcheck()
+    except Exception:
+        # Intentionally swallow all errors; the goal is to keep connections warm.
+        pass
+
+
+def _keepalive_thread_main() -> None:
+    """Thread entry point running the keepalive loop."""
+    global _keepalive_loop, _keepalive_thread, _keepalive_stop_event
+    loop = asyncio.new_event_loop()
+    stop_event = asyncio.Event()
+    try:
+        asyncio.set_event_loop(loop)
+        with _keepalive_lock:
+            _keepalive_loop = loop
+            _keepalive_stop_event = stop_event
+        loop.run_until_complete(_run_keepalive(stop_event))
+    finally:
+        asyncio.set_event_loop(None)
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+        loop.close()
+        with _keepalive_lock:
+            _keepalive_loop = None
+            _keepalive_thread = None
+            _keepalive_stop_event = None
+
+
+def _after_fork_child_subhook() -> None:
+    _stop_keepalive_worker()
+    close_all_clients()
+    for client in list(_clients):
+        setattr(client, "_initialized", False)
+
+
+def _before_fork_subhook() -> None:
+    _stop_keepalive_worker()
+
+
+def _after_fork_parent_subhook() -> None:
+    _ensure_keepalive_worker()
+
+
+register_before_fork_subhook(_before_fork_subhook)
+register_after_fork_child_subhook(_after_fork_child_subhook)
+register_after_fork_parent_subhook(_after_fork_parent_subhook)
 
 
 __all__ = [
