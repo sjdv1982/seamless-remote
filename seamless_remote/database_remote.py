@@ -5,6 +5,8 @@ Primarily for transformation results, but also:
 - ...
 """
 
+import os
+
 from seamless import Buffer, Checksum
 from .database_client import DatabaseClient, DatabaseLaunchedClient
 
@@ -45,6 +47,12 @@ def define_extern_client(name, type_, *, params=None, url=None, readonly=True):
 
 _read_database_clients: list[DatabaseClient] = []
 _write_database_clients: list[DatabaseClient] = []
+_DEBUG = os.environ.get("SEAMLESS_DEBUG_REMOTE_DB", "").lower() in ("1", "true", "yes")
+
+
+def _debug(msg: str) -> None:
+    if _DEBUG:
+        print(f"[database_remote] {msg}", flush=True)
 
 
 # TODO extra launched clients and extern clients in config YAML
@@ -108,7 +116,9 @@ async def get_transformation_result(tf_checksum: Checksum) -> Checksum | None:
     tf_checksum = Checksum(tf_checksum)
 
     for client in _read_database_clients:
+        _debug(f"query {client} for {tf_checksum.hex()}")
         result = await client.get_transformation_result(tf_checksum)
+        _debug(f"client {client} returned {result}")
         if result is not None:
             return result
 

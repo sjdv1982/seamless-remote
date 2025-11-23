@@ -5,17 +5,13 @@ from __future__ import annotations
 import asyncio
 import threading
 import weakref
+import os
+import traceback
 from functools import wraps
 from typing import Any, Awaitable, Callable, Optional, TypeVar, cast
 
 import aiohttp
 from aiohttp import ClientConnectionError, ClientPayloadError
-from seamless.caching.fork_handler import (
-    register_after_fork_child_subhook,
-    register_after_fork_parent_subhook,
-    register_before_fork_subhook,
-)
-
 RETRYABLE_EXCEPTIONS = (
     ClientConnectionError,
     ClientPayloadError,
@@ -64,6 +60,19 @@ class Client:
         self._sessions = weakref.WeakKeyDictionary()
         _clients.add(self)
         _ensure_keepalive_worker()
+        # Ensure sessions are not leaked if the client is GC'd before explicit cleanup.
+        self._finalizer = weakref.finalize(self, Client._finalize, weakref.ref(self))
+
+    @staticmethod
+    def _finalize(ref: "weakref.ReferenceType[Client]") -> None:
+        client = ref()
+        if client is None:
+            return
+        try:
+            client._shutdown = True
+            client._close_sessions()
+        except Exception:
+            pass
 
     async def _init(self):
         """Subclasses should override with initialization logic."""
@@ -123,14 +132,27 @@ class Client:
         if session_async is not None:
             try:
                 loop = asyncio.get_running_loop()
-                if loop != session_async._loop:
+                if (
+                    loop != session_async._loop
+                    or session_async.closed
+                    or session_async._loop.is_closed()
+                ):
+                    self._sessions.pop(thread, None)
+                    _close_session(session_async)
                     session_async = None
             except RuntimeError:
+                self._sessions.pop(thread, None)
+                _close_session(session_async)
                 session_async = None
         if session_async is None:
             timeout = aiohttp.ClientTimeout(total=10)
             session_async = aiohttp.ClientSession(timeout=timeout)
             self._sessions[thread] = session_async
+            try:
+                setattr(session_async, "_seamless_owner", weakref.ref(self))
+            except Exception:
+                pass
+            _log_session_event("created", self, session_async)
         return session_async
 
     async def healthcheck(self) -> None:
@@ -165,13 +187,17 @@ class Client:
 
 
 def close_all_clients():
-    """Close all tracked API clients."""
+    """Close all tracked API clients and stop keepalive worker."""
+    _stop_keepalive_worker()
     for client in list(_clients):
         client._close_sessions()
 
 
 def _close_session(session: aiohttp.ClientSession) -> None:
     """Close a session on the event loop it belongs to."""
+    owner_ref = getattr(session, "_seamless_owner", None)
+    owner = owner_ref() if owner_ref is not None else None
+    _log_session_event("close", owner, session)
     loop = getattr(session, "_loop", None)
     if loop is None or loop.is_closed():
         _finalize_session_without_loop(session)
@@ -194,7 +220,8 @@ def _close_session(session: aiohttp.ClientSession) -> None:
         coro = session.close()
         fut = asyncio.run_coroutine_threadsafe(coro, loop)
         try:
-            fut.result(timeout=0.05)
+            ### fut.result(timeout=0.05)
+            fut.result()
         except Exception:
             pass
         return
@@ -260,7 +287,9 @@ def _stop_keepalive_worker() -> None:
             stop_event.set()
 
     loop.call_soon_threadsafe(_request_stop)
-    thread.join(timeout=10)
+    thread.join()
+    for client in list(_clients):
+        client._close_sessions_for_thread(thread)
     with _keepalive_lock:
         _keepalive_thread = None
         _keepalive_loop = None
@@ -321,31 +350,15 @@ def _keepalive_thread_main() -> None:
             loop.run_until_complete(loop.shutdown_asyncgens())
         except Exception:
             pass
+        try:
+            loop.run_until_complete(loop.shutdown_default_executor())
+        except Exception:
+            pass
         loop.close()
         with _keepalive_lock:
             _keepalive_loop = None
             _keepalive_thread = None
             _keepalive_stop_event = None
-
-
-def _after_fork_child_subhook() -> None:
-    _stop_keepalive_worker()
-    close_all_clients()
-    for client in list(_clients):
-        setattr(client, "_initialized", False)
-
-
-def _before_fork_subhook() -> None:
-    _stop_keepalive_worker()
-
-
-def _after_fork_parent_subhook() -> None:
-    _ensure_keepalive_worker()
-
-
-register_before_fork_subhook(_before_fork_subhook)
-register_after_fork_child_subhook(_after_fork_child_subhook)
-register_after_fork_parent_subhook(_after_fork_parent_subhook)
 
 
 __all__ = [
@@ -356,3 +369,27 @@ __all__ = [
     "_finalize_session_without_loop",
     "close_all_clients",
 ]
+_CLIENT_DEBUG = os.environ.get("SEAMLESS_CLIENT_DEBUG", "").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+
+
+def _log_session_event(
+    event: str, client: "Client | None", session: aiohttp.ClientSession
+) -> None:
+    if not _CLIENT_DEBUG:
+        return
+    try:
+        thread = threading.current_thread()
+        stack = "".join(traceback.format_stack(limit=5))
+        owner = client.__class__.__name__ if client is not None else "UnknownClient"
+        print(
+            f"[pid={os.getpid()}][{event}] {owner} "
+            f"thread={thread.name} session={id(session)}",
+            flush=True,
+        )
+        print(stack, flush=True)
+    except Exception:
+        pass
