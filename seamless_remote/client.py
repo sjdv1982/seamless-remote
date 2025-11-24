@@ -12,6 +12,8 @@ from typing import Any, Awaitable, Callable, Optional, TypeVar, cast
 
 import aiohttp
 from aiohttp import ClientConnectionError, ClientPayloadError
+from seamless import is_worker
+
 RETRYABLE_EXCEPTIONS = (
     ClientConnectionError,
     ClientPayloadError,
@@ -28,11 +30,17 @@ _keepalive_lock = threading.RLock()
 F = TypeVar("F", bound=Callable[..., Awaitable[Any]])
 
 
+def _ensure_not_child() -> None:
+    if is_worker():
+        raise RuntimeError("Remote clients are unavailable inside child processes")
+
+
 def _retry_operation(method: F) -> F:
     """Decorator that retries transient failures after reinitializing the client."""
 
     @wraps(method)
     async def wrapper(self, *args, **kwargs):
+        _ensure_not_child()
         for attempt in range(5):
             try:
                 await self._wait_for_init()
@@ -55,6 +63,7 @@ class Client:
     _shutdown = False
 
     def __init__(self, readonly: bool):
+        _ensure_not_child()
         self.readonly = readonly
         self._initialized = False
         self._sessions = weakref.WeakKeyDictionary()
