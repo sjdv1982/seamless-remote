@@ -1,7 +1,5 @@
 """Async client for Seamless databases."""
 
-import atexit
-
 from aiohttp import ClientConnectionError
 from frozendict import frozendict
 
@@ -111,6 +109,3 @@ class DatabaseLaunchedClient(DatabaseClient):
             return
         self._do_init()
         self._initialized = True
-
-
-atexit.register(close_all_clients)

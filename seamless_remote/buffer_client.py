@@ -1,7 +1,6 @@
 """Async client for buffer read/write servers or buffer directories."""
 
 import asyncio
-import atexit
 import json
 import os
 import pathlib
@@ -231,6 +230,3 @@ class BufferLaunchedClient(BufferClient):
             return
         self._do_init()
         self._initialized = True
-
-
-atexit.register(_close_all_clients)
