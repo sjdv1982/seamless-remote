@@ -12,7 +12,7 @@ from typing import Any, Awaitable, Callable, Optional, TypeVar, cast
 
 import aiohttp
 from aiohttp import ClientConnectionError, ClientPayloadError
-from seamless import is_worker
+from seamless import is_worker, ensure_open
 
 RETRYABLE_EXCEPTIONS = (
     ClientConnectionError,
@@ -33,6 +33,7 @@ F = TypeVar("F", bound=Callable[..., Awaitable[Any]])
 def _ensure_not_child() -> None:
     if is_worker():
         raise RuntimeError("Remote clients are unavailable inside child processes")
+    ensure_open("remote client")
 
 
 def _retry_operation(method: F) -> F:
@@ -197,6 +198,7 @@ class Client:
 
 def close_all_clients():
     """Close all tracked API clients and stop keepalive worker."""
+    ensure_open("close remote clients")
     _stop_keepalive_worker()
     for client in list(_clients):
         client._close_sessions()
