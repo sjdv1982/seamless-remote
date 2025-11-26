@@ -1,4 +1,5 @@
 import asyncio
+import seamless
 import seamless.config
 
 seamless.config.init()
@@ -10,3 +11,4 @@ buf.incref()
 print(buf.checksum)
 
 asyncio.run(asyncio.sleep(1))
+seamless.close()

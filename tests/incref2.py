@@ -1,4 +1,5 @@
 import asyncio
+import seamless
 import seamless.config
 
 seamless.config.init()
@@ -18,3 +19,4 @@ async def main(content, sleep):
 asyncio.run(main(b"test buffer 1", False))
 asyncio.run(main(b"test buffer 2", False))
 asyncio.run(main(b"test buffer 3", True))
+seamless.close()
