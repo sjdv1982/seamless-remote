@@ -58,6 +58,67 @@ def define_extern_client(
     _extern_clients[name] = client
 
 
+def inspect_extern_clients():
+    """Return inspection info for all defined external buffer clients."""
+    result = []
+    for name, client in _extern_clients.items():
+        try:
+            client.ensure_initialized_sync(skip_healthcheck=True)
+        except Exception:
+            pass
+        result.append(
+            {
+                "name": name,
+                "readonly": bool(client.readonly),
+                "url": getattr(client, "url", None),
+                "directory": getattr(client, "directory", None),
+            }
+        )
+    return result
+
+
+def inspect_launched_clients():
+    """Return inspection info for all launched buffer clients."""
+    result = []
+    from frozendict import frozendict
+    from .buffer_client import _launcher_cache
+
+    for key, client in _launched_clients.items():
+        readonly, cluster, project, subproject, stage = key
+        try:
+            client.ensure_initialized_sync(skip_healthcheck=True)
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
+            pass
+        launch_conf = getattr(client, "launch_config", {}) or {}
+        server_conf = _launcher_cache.get(frozendict(launch_conf))
+        tun_host = None
+        tun_port = None
+        if server_conf is not None:
+            tun_host = server_conf.get("tunneled-network-interface")
+            tun_port = server_conf.get("tunneled-port")
+        tun_url = None
+        if tun_host is not None and tun_port is not None:
+            try:
+                tun_url = f"http://{tun_host}:{int(tun_port)}"
+            except Exception:
+                tun_url = None
+        result.append(
+            {
+                "readonly": bool(readonly),
+                "cluster": cluster,
+                "project": project,
+                "subproject": subproject,
+                "stage": stage,
+                "url": tun_url if tun_url is not None else getattr(client, "url", None),
+                "directory": getattr(client, "directory", None),
+            }
+        )
+    return result
+
+
 _read_server_clients: list[BufferClient] = []
 _read_folders_clients: list[BufferClient] = []
 _write_server_clients: list[BufferClient] = []

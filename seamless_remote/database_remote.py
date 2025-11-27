@@ -45,6 +45,46 @@ def define_extern_client(name, type_, *, params=None, url=None, readonly=True):
     _extern_clients[name] = client
 
 
+def inspect_extern_clients():
+    """Return inspection info for all defined external database clients."""
+    result = []
+    for name, client in _extern_clients.items():
+        try:
+            client.ensure_initialized_sync(skip_healthcheck=True)
+        except Exception:
+            pass
+        result.append(
+            {
+                "name": name,
+                "readonly": bool(client.readonly),
+                "url": getattr(client, "url", None),
+            }
+        )
+    return result
+
+
+def inspect_launched_clients():
+    """Return inspection info for all launched database clients."""
+    result = []
+    for key, client in _launched_clients.items():
+        readonly, cluster, project, subproject, stage = key
+        try:
+            client.ensure_initialized_sync(skip_healthcheck=True)
+        except Exception:
+            pass
+        result.append(
+            {
+                "readonly": bool(readonly),
+                "cluster": cluster,
+                "project": project,
+                "subproject": subproject,
+                "stage": stage,
+                "url": getattr(client, "url", None),
+            }
+        )
+    return result
+
+
 _read_database_clients: list[DatabaseClient] = []
 _write_database_clients: list[DatabaseClient] = []
 _DEBUG = os.environ.get("SEAMLESS_DEBUG_REMOTE_DB", "").lower() in ("1", "true", "yes")

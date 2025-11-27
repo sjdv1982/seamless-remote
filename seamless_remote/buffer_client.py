@@ -224,7 +224,7 @@ class BufferLaunchedClient(BufferClient):
     async def _init(self):
         self._do_init()
 
-    def ensure_initialized_sync(self):
+    def ensure_initialized_sync(self, *, skip_healthcheck: bool = False):
         """Synchronously ensure initialization."""
         if self._initialized:
             return
