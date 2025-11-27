@@ -125,31 +125,31 @@ _write_server_clients: list[BufferClient] = []
 
 
 # TODO extra launched clients and extern clients in config YAML
-def activate(*, readonly=False, extra_launched_clients=[], extern_clients=[]):
+def activate(*, readonly=False, extra_launched_clients=[], extern_clients=[], no_main=False):
     if DISABLED:
         return
     from seamless_config.select import get_current
 
-    cluster, project, subproject, stage, _ = get_current()
-    assert cluster is not None and project is not None
-
     rs_clients = []
     rf_clients = []
     ws_clients = []
-
     launch_keys = []
 
-    main_key = readonly, cluster, project, subproject, stage
-    launch_keys.append(main_key)
-    if main_key not in _launched_clients:
-        define_launched_client(*main_key)
+    if not no_main:
+        cluster, project, subproject, stage, _ = get_current()
+        assert cluster is not None and project is not None
 
-    client = _launched_clients[main_key]
-    rs_clients.append(client)
-    if client.local:
-        rf_clients.append(client)
-    if not readonly:
-        ws_clients.append(_launched_clients[main_key])
+        main_key = readonly, cluster, project, subproject, stage
+        launch_keys.append(main_key)
+        if main_key not in _launched_clients:
+            define_launched_client(*main_key)
+
+        client = _launched_clients[main_key]
+        rs_clients.append(client)
+        if client.local:
+            rf_clients.append(client)
+        if not readonly:
+            ws_clients.append(_launched_clients[main_key])
 
     for params in extra_launched_clients:
         c_readonly = params.get("readonly", True)
