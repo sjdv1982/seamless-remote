@@ -1,7 +1,0 @@
-pyproject.toml
-seamless_remote/buffer_read_client.py
-seamless_remote/launch.py
-seamless_remote.egg-info/PKG-INFO
-seamless_remote.egg-info/SOURCES.txt
-seamless_remote.egg-info/dependency_links.txt
-seamless_remote.egg-info/top_level.txt
