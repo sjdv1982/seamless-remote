@@ -1,7 +1,9 @@
 """Async client for Seamless jobservers."""
 
+from aiohttp import ClientConnectionError
 from frozendict import frozendict
 
+from seamless import Checksum
 from seamless.util.pylru import lrucache
 
 from .client import Client, _retry_operation
@@ -32,7 +34,22 @@ class JobserverClient(Client):
         tf_dunder,
         scratch: bool,
     ):
-        raise NotImplementedError
+        session_async = self._get_session()
+        tf_checksum = Checksum(tf_checksum)
+        request = {
+            "transformation_dict": transformation_dict,
+            "tf_checksum": tf_checksum.hex(),
+            "tf_dunder": tf_dunder,
+            "scratch": bool(scratch),
+        }
+
+        path = self._require_url() + "/run-transformation"
+        async with session_async.get(path, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        return Checksum(result0)
 
 
 _launcher_cache = lrucache(1000)
