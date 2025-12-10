@@ -67,7 +67,8 @@ class Client:
         _ensure_not_child()
         self.readonly = readonly
         self._initialized = False
-        self._sessions = weakref.WeakKeyDictionary()
+        # Keep strong references to sessions; they are closed explicitly in close_all_clients.
+        self._sessions = {}
         _clients.add(self)
         _ensure_keepalive_worker()
         # Ensure sessions are not leaked if the client is GC'd before explicit cleanup.
