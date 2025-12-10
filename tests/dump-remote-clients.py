@@ -1,9 +1,10 @@
 import sys, json
-import seamless, seamless_config
-from seamless_config.extern_clients import collect_remote_clients
+import seamless
+import seamless.config
+from seamless.config import collect_remote_clients
 
 outfile = sys.argv[1]
-seamless_config.init()
+seamless.config.init()
 from seamless_config.select import get_current
 
 cluster = get_current()[0]
