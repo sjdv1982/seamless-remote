@@ -125,7 +125,9 @@ _write_server_clients: list[BufferClient] = []
 
 
 # TODO extra launched clients and extern clients in config YAML
-def activate(*, readonly=False, extra_launched_clients=[], extern_clients=[], no_main=False):
+def activate(
+    *, readonly=False, extra_launched_clients=[], extern_clients=[], no_main=False
+):
     if DISABLED:
         return
     from seamless_config.select import get_current
@@ -232,6 +234,21 @@ async def get_filename(checksum: Checksum) -> str | None:
     """
 
 
+async def promise(checksum: Checksum) -> None:
+    """Make a promise to the buffer write servers, if one or more exist."""
+    checksum = Checksum(checksum)
+    """
+    if checksum in _written_buffers:
+        return
+    """
+    # print("PROMISE BUFFER", checksum.hex())
+
+    # TODO: do this in parallel
+    for client in _write_server_clients:
+        await client.promise(checksum)
+    return
+
+
 async def write_buffer(checksum: Checksum, buffer: Buffer) -> bool:
     """Write the buffer to the buffer write servers, if one or more exist."""
     checksum = Checksum(checksum)
@@ -245,8 +262,8 @@ async def write_buffer(checksum: Checksum, buffer: Buffer) -> bool:
     # TODO: do this in parallel
     written = False
     for client in _write_server_clients:
-        if await client.buffer_length(checksum):
-            continue
+        # DO NOT check for buffer_length / has, because of promises.
+        #  If the buffer is present already, the hashserver will return instantly
         ok = await client.write(checksum, buffer)
         if ok:
             written = True

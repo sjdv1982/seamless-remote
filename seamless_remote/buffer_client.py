@@ -105,6 +105,19 @@ class BufferClient(Client):
             return buf
 
     @_retry_operation
+    async def promise(self, checksum: Checksum):
+        """Promise that a buffer will be uploaded to the configured server."""
+        if self.readonly:
+            raise AttributeError("Read-only buffer client")
+        session_async = self._get_session()
+        checksum = Checksum(checksum)
+        path = self._require_url() + "/promise/" + str(checksum)
+        async with session_async.put(path) as response:
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+
+    @_retry_operation
     async def write(self, checksum: Checksum, buffer: Buffer):
         """Upload a buffer to the configured server."""
         if self.readonly:
