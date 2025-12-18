@@ -36,6 +36,7 @@ class DaskserverLaunchedHandle:
     cores: int
     dashboard_url: str | None
     remote_clients: dict | None
+    interactive: bool
 
     def __init__(
         self,
@@ -48,6 +49,7 @@ class DaskserverLaunchedHandle:
         self.dashboard_url = None
         self.remote_clients = None
         self.cores = 1
+        self.interactive = False
         self.config(cluster, project, subproject, stage, substage)
         self._do_init()
 
@@ -75,6 +77,10 @@ class DaskserverLaunchedHandle:
             self.cores = int(file_params.get("cores") or 1)
         except Exception:
             self.cores = 1
+        try:
+            self.interactive = bool(file_params.get("interactive"))
+        except Exception:
+            self.interactive = False
 
     def _do_init(self) -> None:
         import remote_http_launcher
@@ -103,6 +109,9 @@ class DaskserverLaunchedHandle:
         from distributed import Client as DistributedClient
         from seamless_dask.client import SeamlessDaskClient
 
+        cluster_string = (self.launch_config or {}).get("cluster_string", "")
+        is_local_cluster = "LocalCluster" in str(cluster_string)
+
         distributed_client = DistributedClient(
             scheduler_address, timeout="10s", set_as_default=False
         )
@@ -110,6 +119,8 @@ class DaskserverLaunchedHandle:
             distributed_client,
             worker_plugin_workers=self.cores,
             remote_clients=self.remote_clients,
+            is_local_cluster=is_local_cluster,
+            interactive=self.interactive,
         )
 
 

@@ -124,6 +124,15 @@ _read_folders_clients: list[BufferClient] = []
 _write_server_clients: list[BufferClient] = []
 
 
+def has_write_server() -> bool:
+    """Return True when at least one buffer write server client is configured."""
+
+    try:
+        return bool(_write_server_clients)
+    except Exception:
+        return False
+
+
 # TODO extra launched clients and extern clients in config YAML
 def activate(
     *, readonly=False, extra_launched_clients=[], extern_clients=[], no_main=False

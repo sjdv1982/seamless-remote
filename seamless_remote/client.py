@@ -33,7 +33,7 @@ F = TypeVar("F", bound=Callable[..., Awaitable[Any]])
 def _ensure_not_child() -> None:
     if is_worker():
         raise RuntimeError("Remote clients are unavailable inside child processes")
-    ensure_open("remote client")
+    ensure_open("remote client", mark_required=False)
 
 
 def _retry_operation(method: F) -> F:
