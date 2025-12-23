@@ -108,6 +108,24 @@ _write_database_clients: list[DatabaseClient] = []
 _DEBUG = os.environ.get("SEAMLESS_DEBUG_REMOTE_DB", "").lower() in ("1", "true", "yes")
 
 
+def has_write_server() -> bool:
+    """Return True when at least one database write client is configured."""
+
+    try:
+        return bool(_write_database_clients)
+    except Exception:
+        return False
+
+
+def has_read_server() -> bool:
+    """Return True when at least one database read client is configured."""
+
+    try:
+        return bool(_read_database_clients)
+    except Exception:
+        return False
+
+
 def _debug(msg: str) -> None:
     if _DEBUG:
         print(f"[database_remote] {msg}", flush=True)

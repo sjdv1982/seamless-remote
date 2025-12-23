@@ -172,8 +172,10 @@ class Client:
             return
         session_async = self._get_session()
         path = self._require_url() + "/healthcheck"
+        from aiohttp import ClientTimeout
+
         try:
-            async with session_async.get(path) as response:
+            async with session_async.get(path, timeout=ClientTimeout(10)) as response:
                 if not (200 <= response.status < 300):
                     text = await response.text()
                     raise RuntimeError(

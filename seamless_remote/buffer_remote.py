@@ -133,6 +133,15 @@ def has_write_server() -> bool:
         return False
 
 
+def has_read_server() -> bool:
+    """Return True when at least one buffer read server client is configured."""
+
+    try:
+        return bool(_read_server_clients)
+    except Exception:
+        return False
+
+
 # TODO extra launched clients and extern clients in config YAML
 def activate(
     *, readonly=False, extra_launched_clients=[], extern_clients=[], no_main=False
