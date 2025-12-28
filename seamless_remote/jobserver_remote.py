@@ -45,7 +45,10 @@ def define_extern_client(name, type_, *, url=None):
 
 
 def activate(
-    *, extra_launched_clients: list[dict] | None = None, extern_clients: list[str] | None = None, no_main: bool = False
+    *,
+    extra_launched_clients: list[dict] | None = None,
+    extern_clients: list[str] | None = None,
+    no_main: bool = False,
 ):
     if DISABLED:
         return

@@ -21,6 +21,8 @@ RETRYABLE_EXCEPTIONS = (
     FileNotFoundError,
 )
 
+_ALLOW_REMOTE_CLIENTS_ENV = "SEAMLESS_ALLOW_REMOTE_CLIENTS_IN_WORKER"
+
 _clients = weakref.WeakSet()
 _keepalive_loop: Optional[asyncio.AbstractEventLoop] = None
 _keepalive_thread: Optional[threading.Thread] = None
@@ -30,8 +32,13 @@ _keepalive_lock = threading.RLock()
 F = TypeVar("F", bound=Callable[..., Awaitable[Any]])
 
 
+def _remote_clients_allowed_in_worker() -> bool:
+    value = os.environ.get(_ALLOW_REMOTE_CLIENTS_ENV, "")
+    return value.lower() in ("1", "true", "yes")
+
+
 def _ensure_not_child() -> None:
-    if is_worker():
+    if is_worker() and not _remote_clients_allowed_in_worker():
         raise RuntimeError("Remote clients are unavailable inside child processes")
     ensure_open("remote client", mark_required=False)
 
