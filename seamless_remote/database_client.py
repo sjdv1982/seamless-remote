@@ -1,5 +1,7 @@
 """Async client for Seamless databases."""
 
+import asyncio
+import os
 from aiohttp import ClientConnectionError
 from frozendict import frozendict
 
@@ -13,6 +15,13 @@ class DatabaseClient(Client):
     """Async client for Seamless databases."""
 
     url: str | None = None
+    _monitor_interval = 1.0
+
+    def __init__(self, readonly: bool):
+        super().__init__(readonly)
+        self._max_inflight = _parse_max_inflight()
+        self._semaphores: dict[asyncio.AbstractEventLoop, asyncio.Semaphore] = {}
+        self._monitor_tasks: dict[asyncio.AbstractEventLoop, asyncio.Task] = {}
 
     async def _init(self):
         pass
@@ -22,9 +31,67 @@ class DatabaseClient(Client):
             raise ValueError("Provide a URL")
         self.url = self.url.rstrip("/")
 
+    def _get_semaphore(self) -> asyncio.Semaphore | None:
+        if self._max_inflight <= 0:
+            return None
+        loop = asyncio.get_running_loop()
+        semaphore = self._semaphores.get(loop)
+        if semaphore is None:
+            semaphore = asyncio.Semaphore(self._max_inflight)
+            self._semaphores[loop] = semaphore
+            self._start_monitor(loop, semaphore)
+        return semaphore
+
+    def _start_monitor(
+        self, loop: asyncio.AbstractEventLoop, semaphore: asyncio.Semaphore
+    ) -> None:
+        if loop in self._monitor_tasks:
+            return
+        max_inflight = self._max_inflight
+
+        async def _monitor():
+            was_saturated = False
+            while True:
+                try:
+                    await asyncio.sleep(self._monitor_interval)
+                except asyncio.CancelledError:
+                    return
+                value = getattr(semaphore, "_value", None)
+                if value is None:
+                    continue
+                if value <= 0:
+                    if not was_saturated:
+                        was_saturated = True
+                        print(
+                            "[database_client] GET semaphore saturated "
+                            f"(max_inflight={max_inflight})",
+                            flush=True,
+                        )
+                elif value >= max_inflight and was_saturated:
+                    was_saturated = False
+                    print(
+                        "[database_client] GET semaphore drained",
+                        flush=True,
+                    )
+
+        self._monitor_tasks[loop] = loop.create_task(_monitor())
+
     @_retry_operation
     async def get_transformation_result(self, tf_checksum: Checksum) -> Checksum | None:
         """Return result of the transformation 'tf_checksum', if known."""
+        semaphore = self._get_semaphore()
+        if semaphore is None:
+            return await self._get_transformation_result_unthrottled(tf_checksum)
+
+        await semaphore.acquire()
+        try:
+            return await self._get_transformation_result_unthrottled(tf_checksum)
+        finally:
+            semaphore.release()
+
+    async def _get_transformation_result_unthrottled(
+        self, tf_checksum: Checksum
+    ) -> Checksum | None:
         session_async = self._get_session()
         tf_checksum = Checksum(tf_checksum)
 
@@ -109,3 +176,12 @@ class DatabaseLaunchedClient(DatabaseClient):
             return
         self._do_init()
         self._initialized = True
+
+
+def _parse_max_inflight() -> int:
+    raw = os.environ.get("SEAMLESS_DATABASE_MAX_INFLIGHT", "100")
+    try:
+        value = int(raw)
+    except Exception:
+        return 100
+    return max(0, value)
