@@ -180,9 +180,10 @@ class DatabaseLaunchedClient(DatabaseClient):
 
 
 def _parse_max_inflight() -> int:
-    raw = os.environ.get("SEAMLESS_DATABASE_MAX_INFLIGHT", "100")
+    default = 30
+    raw = os.environ.get("SEAMLESS_DATABASE_MAX_INFLIGHT", default)
     try:
         value = int(raw)
     except Exception:
-        return 100
+        return default
     return max(0, value)
