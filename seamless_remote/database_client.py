@@ -39,7 +39,8 @@ class DatabaseClient(Client):
         if semaphore is None:
             semaphore = asyncio.Semaphore(self._max_inflight)
             self._semaphores[loop] = semaphore
-            self._start_monitor(loop, semaphore)
+            # Disable monitoring until we need to debug
+            ### self._start_monitor(loop, semaphore)
         return semaphore
 
     def _start_monitor(
