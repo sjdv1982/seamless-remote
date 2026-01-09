@@ -83,6 +83,13 @@ def inspect_launched_clients():
     from frozendict import frozendict
     from .buffer_client import _launcher_cache
 
+    def _ensure_scheme(url: str | None) -> str | None:
+        if url is None:
+            return None
+        if "://" in url:
+            return url
+        return "http://" + url
+
     for key, client in _launched_clients.items():
         readonly, cluster, project, subproject, stage = key
         try:
@@ -98,13 +105,11 @@ def inspect_launched_clients():
         tun_port = None
         if server_conf is not None:
             tun_host = server_conf.get("tunneled-network-interface")
+            if tun_host is not None:
+                tun_host = tun_host.replace("0.0.0.0", "127.0.0.1")
             tun_port = server_conf.get("tunneled-port")
-        remote_url = None
-        if server_conf is not None:
-            remote_host = launch_conf.get("hostname") or server_conf.get(
-                "tunneled-network-interface"
-            )
-            remote_port = server_conf.get("tunneled-port") or server_conf.get("port")
+            remote_host = launch_conf.get("hostname") or tun_host
+            remote_port = tun_port or server_conf.get("port")
             if remote_host is not None and remote_port is not None:
                 try:
                     remote_url = f"http://{remote_host}:{int(remote_port)}"
@@ -116,6 +121,7 @@ def inspect_launched_clients():
                 tun_url = f"http://{tun_host}:{int(tun_port)}"
             except Exception:
                 tun_url = None
+        url = tun_url if tun_url is not None else getattr(client, "url", None)
         result.append(
             {
                 "readonly": bool(readonly),
@@ -123,8 +129,8 @@ def inspect_launched_clients():
                 "project": project,
                 "subproject": subproject,
                 "stage": stage,
-                "url": tun_url if tun_url is not None else getattr(client, "url", None),
-                "remote_url": remote_url,
+                "url": _ensure_scheme(url),
+                "remote_url": _ensure_scheme(remote_url),
                 "directory": getattr(client, "directory", None),
             }
         )

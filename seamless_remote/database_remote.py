@@ -69,6 +69,14 @@ def inspect_launched_clients():
     from .database_client import _launcher_cache
 
     result = []
+
+    def _ensure_scheme(url: str | None) -> str | None:
+        if url is None:
+            return None
+        if "://" in url:
+            return url
+        return "http://" + url
+
     for key, client in _launched_clients.items():
         readonly, cluster, project, subproject, stage = key
         try:
@@ -101,6 +109,7 @@ def inspect_launched_clients():
             except Exception:
                 tun_url = None
 
+        url = tun_url if tun_url is not None else getattr(client, "url", None)
         result.append(
             {
                 "readonly": bool(readonly),
@@ -108,8 +117,8 @@ def inspect_launched_clients():
                 "project": project,
                 "subproject": subproject,
                 "stage": stage,
-                "url": tun_url if tun_url is not None else getattr(client, "url", None),
-                "remote_url": remote_url,
+                "url": _ensure_scheme(url),
+                "remote_url": _ensure_scheme(remote_url),
             }
         )
     return result

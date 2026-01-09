@@ -258,4 +258,3 @@ class BufferLaunchedClient(BufferClient):
             return
         self._do_init()
         self._initialized = True
-
