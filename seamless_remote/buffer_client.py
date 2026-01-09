@@ -29,6 +29,9 @@ class BufferClient(Client):
     url: Optional[str] = None
     directory: Optional[str] = None
 
+    def __init__(self, readonly: bool):
+        super().__init__(readonly)
+
     async def _init(self):
         pass
 
@@ -50,6 +53,9 @@ class BufferClient(Client):
     @_retry_operation
     async def buffer_length(self, checksum: Checksum) -> bool:
         """Return True if the buffer exists on the remote server."""
+        return await self._buffer_length_unthrottled(checksum)
+
+    async def _buffer_length_unthrottled(self, checksum: Checksum) -> bool:
         session_async = self._get_session()
         checksum = Checksum(checksum)
         cs = checksum.hex()
@@ -77,6 +83,9 @@ class BufferClient(Client):
     @_retry_operation
     async def get(self, checksum: Checksum) -> Buffer | None:
         """Download a buffer from the configured server."""
+        return await self._get_unthrottled(checksum)
+
+    async def _get_unthrottled(self, checksum: Checksum) -> Buffer | None:
         session_async = self._get_session()
         checksum = Checksum(checksum)
         assert checksum
@@ -109,6 +118,9 @@ class BufferClient(Client):
         """Promise that a buffer will be uploaded to the configured server."""
         if self.readonly:
             raise AttributeError("Read-only buffer client")
+        await self._promise_unthrottled(checksum)
+
+    async def _promise_unthrottled(self, checksum: Checksum) -> None:
         session_async = self._get_session()
         checksum = Checksum(checksum)
         path = self._require_url() + "/promise/" + str(checksum)
@@ -122,6 +134,9 @@ class BufferClient(Client):
         """Upload a buffer to the configured server."""
         if self.readonly:
             raise AttributeError("Read-only buffer client")
+        await self._write_unthrottled(checksum, buffer)
+
+    async def _write_unthrottled(self, checksum: Checksum, buffer: Buffer) -> None:
         session_async = self._get_session()
         checksum = Checksum(checksum)
         buffer_bytes = Buffer(buffer).content
@@ -243,3 +258,4 @@ class BufferLaunchedClient(BufferClient):
             return
         self._do_init()
         self._initialized = True
+
