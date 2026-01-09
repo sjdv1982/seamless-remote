@@ -99,6 +99,17 @@ def inspect_launched_clients():
         if server_conf is not None:
             tun_host = server_conf.get("tunneled-network-interface")
             tun_port = server_conf.get("tunneled-port")
+        remote_url = None
+        if server_conf is not None:
+            remote_host = launch_conf.get("hostname") or server_conf.get(
+                "tunneled-network-interface"
+            )
+            remote_port = server_conf.get("tunneled-port") or server_conf.get("port")
+            if remote_host is not None and remote_port is not None:
+                try:
+                    remote_url = f"http://{remote_host}:{int(remote_port)}"
+                except Exception:
+                    remote_url = None
         tun_url = None
         if tun_host is not None and tun_port is not None:
             try:
@@ -113,6 +124,7 @@ def inspect_launched_clients():
                 "subproject": subproject,
                 "stage": stage,
                 "url": tun_url if tun_url is not None else getattr(client, "url", None),
+                "remote_url": remote_url,
                 "directory": getattr(client, "directory", None),
             }
         )
