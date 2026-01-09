@@ -103,6 +103,7 @@ def inspect_launched_clients():
         server_conf = _launcher_cache.get(frozendict(launch_conf))
         tun_host = None
         tun_port = None
+        remote_url = None
         if server_conf is not None:
             tun_host = server_conf.get("tunneled-network-interface")
             if tun_host is not None:

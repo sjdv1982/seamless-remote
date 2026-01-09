@@ -88,15 +88,14 @@ def inspect_launched_clients():
         server_conf = _launcher_cache.get(frozendict(launch_conf))
         tun_host = None
         tun_port = None
-        if server_conf is not None:
-            tun_host = server_conf.get("tunneled-network-interface")
-            tun_port = server_conf.get("tunneled-port")
         remote_url = None
         if server_conf is not None:
-            remote_host = launch_conf.get("hostname") or server_conf.get(
-                "tunneled-network-interface"
-            )
-            remote_port = server_conf.get("tunneled-port") or server_conf.get("port")
+            tun_host = server_conf.get("tunneled-network-interface")
+            if tun_host is not None:
+                tun_host = tun_host.replace("0.0.0.0", "127.0.0.1")
+            tun_port = server_conf.get("tunneled-port")
+            remote_host = launch_conf.get("hostname") or tun_host
+            remote_port = tun_port or server_conf.get("port")
             if remote_host is not None and remote_port is not None:
                 try:
                     remote_url = f"http://{remote_host}:{int(remote_port)}"
