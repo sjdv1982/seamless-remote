@@ -414,3 +414,70 @@ def _log_session_event(
         print(stack, flush=True)
     except Exception:
         pass
+
+
+def inspect_extern_clients(_extern_clients):
+    """Return inspection info for all defined external clients."""
+    result = []
+    for name, client in _extern_clients.items():
+        try:
+            client.ensure_initialized_sync(skip_healthcheck=True)
+        except Exception:
+            pass
+        result.append(
+            {
+                "name": name,
+                "readonly": bool(client.readonly),
+                "url": getattr(client, "url", None),
+                "directory": getattr(client, "directory", None),
+            }
+        )
+    return result
+
+
+def inspect_launched_clients(_launcher_cache, _launched_clients):
+    """Return inspection info for all launched buffer clients."""
+    result = []
+    from .buffer_client import BufferClient
+    from frozendict import frozendict
+
+    def _ensure_scheme(url: str | None) -> str | None:
+        if url is None:
+            return None
+        if "://" in url:
+            return url
+        return "http://" + url
+
+    for key, client in _launched_clients.items():
+        readonly, cluster, project, subproject, stage = key
+        try:
+            client.ensure_initialized_sync(skip_healthcheck=True)
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
+            pass
+        launch_conf = getattr(client, "launch_config", {}) or {}
+        launch_conf = frozendict(launch_conf)
+        server_conf = _launcher_cache.get(launch_conf)
+        url = client.url
+        directory = client.directory
+        remote_url = None
+        remote_directory = None
+        if launch_conf is not None and server_conf is not None:
+            port = server_conf.get("tunneled-port", server_conf["port"])
+            hostname = launch_conf.get("hostname", server_conf["hostname"])
+            remote_url = remote_url = f"http://{hostname}:{int(port)}"
+            if isinstance(client, BufferClient) and not readonly:
+                remote_directory = launch_conf["workdir"]
+        result.append(
+            {
+                "cluster": cluster,
+                "readonly": bool(readonly),
+                "url": _ensure_scheme(url),
+                "remote_url": _ensure_scheme(remote_url),
+                "directory": directory,
+                "remote_directory": remote_directory,
+            }
+        )
+    return result

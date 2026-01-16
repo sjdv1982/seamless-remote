@@ -58,84 +58,20 @@ def define_extern_client(
     _extern_clients[name] = client
 
 
-def inspect_extern_clients():
-    """Return inspection info for all defined external buffer clients."""
-    result = []
-    for name, client in _extern_clients.items():
-        try:
-            client.ensure_initialized_sync(skip_healthcheck=True)
-        except Exception:
-            pass
-        result.append(
-            {
-                "name": name,
-                "readonly": bool(client.readonly),
-                "url": getattr(client, "url", None),
-                "directory": getattr(client, "directory", None),
-            }
-        )
-    return result
+from .client import (
+    inspect_launched_clients as _inspect_launched_clients,
+    inspect_extern_clients as _inspect_extern_clients,
+)
 
 
 def inspect_launched_clients():
-    """Return inspection info for all launched buffer clients."""
-    result = []
-    from frozendict import frozendict
     from .buffer_client import _launcher_cache
 
-    def _ensure_scheme(url: str | None) -> str | None:
-        if url is None:
-            return None
-        if "://" in url:
-            return url
-        return "http://" + url
+    return _inspect_launched_clients(_launcher_cache, _launched_clients)
 
-    for key, client in _launched_clients.items():
-        readonly, cluster, project, subproject, stage = key
-        try:
-            client.ensure_initialized_sync(skip_healthcheck=True)
-        except Exception:
-            import traceback
 
-            traceback.print_exc()
-            pass
-        launch_conf = getattr(client, "launch_config", {}) or {}
-        server_conf = _launcher_cache.get(frozendict(launch_conf))
-        tun_host = None
-        tun_port = None
-        remote_url = None
-        if server_conf is not None:
-            tun_host = server_conf.get("tunneled-network-interface")
-            if tun_host is not None:
-                tun_host = tun_host.replace("0.0.0.0", "127.0.0.1")
-            tun_port = server_conf.get("tunneled-port")
-            remote_host = launch_conf.get("hostname") or tun_host
-            remote_port = tun_port or server_conf.get("port")
-            if remote_host is not None and remote_port is not None:
-                try:
-                    remote_url = f"http://{remote_host}:{int(remote_port)}"
-                except Exception:
-                    remote_url = None
-        tun_url = None
-        if tun_host is not None and tun_port is not None:
-            try:
-                tun_url = f"http://{tun_host}:{int(tun_port)}"
-            except Exception:
-                tun_url = None
-        url = tun_url if tun_url is not None else getattr(client, "url", None)
-        result.append(
-            {
-                "readonly": bool(readonly),
-                "cluster": cluster,
-                "project": project,
-                "subproject": subproject,
-                "stage": stage,
-                "url": _ensure_scheme(url),
-                "remote_url": _ensure_scheme(remote_url),
-                "directory": getattr(client, "directory", None),
-            }
-        )
-    return result
+def inspect_extern_clients():
+    return _inspect_extern_clients(_extern_clients)
 
 
 _read_server_clients: list[BufferClient] = []
