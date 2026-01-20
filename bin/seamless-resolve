@@ -1,0 +1,172 @@
+#!/usr/bin/env -S python3 -u
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import os
+import sys
+
+import seamless
+import seamless.config
+from seamless import Checksum
+from seamless_config.select import select_project, select_subproject
+import seamless_remote.database_remote
+
+
+def _parse_scoped_value(value: str, label: str) -> tuple[str, str | None]:
+    if not value:
+        raise ValueError(f"--{label} requires a value")
+    if ":" in value:
+        head, tail = value.split(":", 1)
+        if not head:
+            raise ValueError(f"Invalid --{label} value '{value}'")
+        if tail == "":
+            tail = None
+        return head, tail
+    return value, None
+
+
+def strip_textdata(data):
+    """Strip textdata"""
+    while 1:
+        old_len = len(data)
+        data = data.strip("\n")
+        data = data.strip()
+        if len(data) == old_len:
+            break
+    lines = [l for l in data.splitlines() if not l.lstrip().startswith("#")]
+    return "\n".join(lines)
+
+
+def read_checksum_file(filename) -> str | None:
+    """Read .CHECKSUM file"""
+    with open(filename) as f:
+        checksum = f.read()
+    checksum = strip_textdata(checksum)
+    try:
+        return Checksum(checksum).hex()
+    except Exception:
+        return None
+
+
+def _configure_logging(*, debug: bool, verbose: bool) -> None:
+    logging.basicConfig()
+    if debug:
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        loop.set_debug(True)
+        level = logging.DEBUG
+    elif verbose:
+        level = logging.INFO
+    else:
+        level = logging.ERROR
+    logging.getLogger("seamless").setLevel(level)
+    logging.getLogger("seamless_remote").setLevel(level)
+
+
+parser = argparse.ArgumentParser(
+    prog="seamless-resolve",
+    description="Resolve a transformation from checksum",
+)
+parser.add_argument("checksum", help="Seamless checksum or checksum file")
+parser.add_argument(
+    "--project",
+    metavar="PROJECT[:SUBPROJECT]",
+    help="set Seamless project (and subproject). Each project has independent storage",
+)
+parser.add_argument(
+    "--stage",
+    metavar="STAGE[:SUBSTAGE]",
+    help="set Seamless project stage (and substage). Each project stage has independent storage",
+)
+
+parser.add_argument(
+    "--verbose",
+    help="Verbose mode, setting the Seamless logger to INFO",
+    action="store_true",
+)
+parser.add_argument(
+    "--debug",
+    help="Debugging mode. Turns on asyncio debugging, and sets the Seamless logger to DEBUG",
+    action="store_true",
+)
+
+parser.add_argument("--output", help="Output file (default: stdout)")
+
+args = parser.parse_args()
+
+if os.path.exists(args.checksum):
+    checksum_hex = read_checksum_file(args.checksum)
+    if not checksum_hex:
+        raise ValueError(f"Invalid checksum file '{args.checksum}'")
+    checksum = Checksum(checksum_hex)
+else:
+    checksum = Checksum(args.checksum)
+
+_configure_logging(debug=args.debug, verbose=args.verbose)
+if args.project:
+    try:
+        project, subproject = _parse_scoped_value(args.project, "project")
+        select_project(project)
+        if subproject:
+            select_subproject(subproject)
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        exit(1)
+if args.stage:
+    try:
+        stage, substage = _parse_scoped_value(args.stage, "stage")
+        if substage:
+            seamless.config.set_stage(stage, substage, workdir=os.getcwd())
+        else:
+            seamless.config.set_stage(stage, workdir=os.getcwd())
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
+        exit(1)
+try:
+
+    # CONFIG
+    """
+    Now we will do something like:
+        seamless.config.init(workdir=os.getcwd())
+
+    However, we must interject overrulings of the execution command,
+    based on the args
+    """
+    from seamless_config import change_stage, set_workdir
+    from seamless_config.config_files import load_config_files
+    from seamless_config.select import (
+        select_execution,
+        get_selected_cluster,
+    )
+
+    set_workdir(os.getcwd())
+    load_config_files()
+    if get_selected_cluster() is None:
+        print(f"Cannot resolve without a cluster defined", file=sys.stderr)
+        exit(1)
+
+    select_execution("process")
+    seamless_remote.database_remote.DISABLED = True
+    change_stage()
+    # /CONFIG
+
+    buffer = checksum.resolve()
+
+    if args.output:
+        try:
+            with open(args.output, "wb") as output_file:
+                output_file.write(buffer)
+        except Exception as exc:
+            print(f"Cannot write output file '{args.output}': {exc}", file=sys.stderr)
+            exit(1)
+    else:
+        txt = buffer.get_value("text")
+        print(txt)
+finally:
+    seamless.close()
