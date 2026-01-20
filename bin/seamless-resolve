@@ -71,9 +71,9 @@ def _configure_logging(*, debug: bool, verbose: bool) -> None:
 
 parser = argparse.ArgumentParser(
     prog="seamless-resolve",
-    description="Resolve a transformation from checksum",
+    description="Resolve a buffer from its SHA-256 checksum using Seamless",
 )
-parser.add_argument("checksum", help="Seamless checksum or checksum file")
+parser.add_argument("checksum", help="SHA-256 checksum or checksum file")
 parser.add_argument(
     "--project",
     metavar="PROJECT[:SUBPROJECT]",
