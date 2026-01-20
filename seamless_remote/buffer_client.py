@@ -240,7 +240,7 @@ class BufferLaunchedClient(BufferClient):
         frozenconf = frozendict(conf)
         server_config = _launcher_cache.get(frozenconf)
         if server_config is None:
-            print("Launch hashserver...")
+            print("Launch hashserver...", file=sys.stderr)
             server_config = remote_http_launcher.run(conf)
             _launcher_cache[frozenconf] = server_config
         hostname = server_config["hostname"]

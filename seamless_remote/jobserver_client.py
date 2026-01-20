@@ -1,5 +1,6 @@
 """Async client for Seamless jobservers."""
 
+import sys
 from aiohttp import ClientConnectionError
 from frozendict import frozendict
 
@@ -103,7 +104,7 @@ class JobserverLaunchedClient(JobserverClient):
         frozenconf = make_frozendict(conf)
         server_config = _launcher_cache.get(frozenconf)
         if server_config is None:
-            print("Launch jobserver...")
+            print("Launch jobserver...", file=sys.stderr)
             server_config = remote_http_launcher.run(conf)
             _launcher_cache[frozenconf] = server_config
         hostname = server_config["hostname"]

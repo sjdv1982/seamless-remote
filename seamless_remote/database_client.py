@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import sys
 from aiohttp import ClientConnectionError
 from frozendict import frozendict
 
@@ -160,7 +161,7 @@ class DatabaseLaunchedClient(DatabaseClient):
         frozenconf = frozendict(conf)
         server_config = _launcher_cache.get(frozenconf)
         if server_config is None:
-            print("Launch database server...")
+            print("Launch database server...", file=sys.stderr)
             server_config = remote_http_launcher.run(conf)
             _launcher_cache[frozenconf] = server_config
         hostname = server_config["hostname"]

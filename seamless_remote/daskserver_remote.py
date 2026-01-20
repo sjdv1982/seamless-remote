@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any, Dict
 
 from frozendict import frozendict
@@ -72,7 +73,7 @@ class DaskserverLaunchedHandle:
             substage=substage,
         )
         self.remote_clients = collect_remote_clients(cluster)
-        file_params = (self.launch_config.get("file_parameters") or {})  # type: ignore[arg-type]
+        file_params = self.launch_config.get("file_parameters") or {}  # type: ignore[arg-type]
         try:
             self.cores = int(file_params.get("cores") or 1)
         except Exception:
@@ -89,7 +90,7 @@ class DaskserverLaunchedHandle:
         frozenconf = _freeze_mapping(conf)
         payload = _launcher_cache.get(frozenconf)
         if payload is None:
-            print("Launch daskserver...")
+            print("Launch daskserver...", file=sys.stderr)
             payload = remote_http_launcher.run(conf)
             _launcher_cache[frozenconf] = payload
 
