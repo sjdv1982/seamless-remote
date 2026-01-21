@@ -10,7 +10,7 @@ from typing import Optional
 
 import aiofiles
 import aiofiles.os
-from aiohttp import ClientConnectionError, ClientPayloadError
+from aiohttp import ClientConnectionError, ClientPayloadError, ClientTimeout
 from frozendict import frozendict
 
 from seamless import Buffer, Checksum
@@ -152,7 +152,7 @@ class BufferClient(Client):
         curr_buf_checksum = None
         while 1:
             path = self._require_url() + "/" + str(checksum)
-            async with session_async.get(path) as response:
+            async with session_async.get(path, timeout=ClientTimeout(10)) as response:
                 if int(response.status) == 404:
                     return None
                 if int(response.status / 100) in (4, 5):
