@@ -55,6 +55,11 @@ class BufferClient(Client):
         """Return True if the buffer exists on the remote server."""
         return await self._buffer_length_unthrottled(checksum)
 
+    @_retry_operation
+    async def buffer_lengths(self, checksums: list[Checksum]) -> list[int | None]:
+        """Return buffer lengths for multiple checksums."""
+        return await self._buffer_lengths_unthrottled(checksums)
+
     async def _buffer_length_unthrottled(self, checksum: Checksum) -> bool:
         session_async = self._get_session()
         checksum = Checksum(checksum)
@@ -79,6 +84,61 @@ class BufferClient(Client):
                 file=sys.stderr,
             )
         return result[0]
+
+    async def _buffer_lengths_unthrottled(
+        self, checksums: list[Checksum]
+    ) -> list[int | None]:
+        if not checksums:
+            return []
+
+        if self.directory is not None and self.url is None:
+            directory = self._require_directory()
+            results: list[int | None] = []
+            for checksum in checksums:
+                checksum = Checksum(checksum)
+                if not checksum:
+                    results.append(None)
+                    continue
+                cs_hex = checksum.hex()
+                path = os.path.join(directory, cs_hex)
+                try:
+                    stat = await aiofiles.os.stat(path)
+                except FileNotFoundError:
+                    stat = None
+                if stat is None:
+                    subdir = os.path.join(directory, cs_hex[:2])
+                    path = os.path.join(subdir, cs_hex)
+                    try:
+                        stat = await aiofiles.os.stat(path)
+                    except FileNotFoundError:
+                        stat = None
+                results.append(stat.st_size if stat is not None else None)
+            return results
+
+        session_async = self._get_session()
+        checksums = [Checksum(checksum) for checksum in checksums]
+        cs_list = [checksum.hex() for checksum in checksums]
+
+        path = self._require_url() + "/has"
+        async with session_async.get(path, json=cs_list) as response:
+            if int(response.status / 100) in (4, 5):
+                raise ClientConnectionError()
+            result0 = await response.read()
+        result = [None] * len(cs_list)
+        try:
+            result = json.loads(result0)
+            if not isinstance(result, list) or len(result) != len(cs_list):
+                raise ValueError(result)
+            if not all(isinstance(item, int) for item in result):
+                raise ValueError(result)
+        except ValueError:
+            print(
+                "WARNING: '{}' has the wrong format for buffer lengths".format(
+                    self.url
+                ),
+                file=sys.stderr,
+            )
+        return result
 
     @_retry_operation
     async def get(self, checksum: Checksum) -> Buffer | None:

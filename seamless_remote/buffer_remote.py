@@ -187,6 +187,56 @@ async def get_buffer(checksum: Checksum) -> Buffer | None:
             return buf
 
 
+async def get_buffer_lengths(checksums: list[Checksum]) -> list[int | None]:
+    """Retrieve buffer lengths from remote sources.
+    First all buffer read folders are queried.
+    Then all buffer read servers are queried."""
+
+    checksums = list(checksums)
+    if not checksums:
+        return []
+
+    results: list[int | None] = [None] * len(checksums)
+    pending: list[tuple[int, Checksum]] = []
+    for idx, checksum in enumerate(checksums):
+        checksum = Checksum(checksum)
+        if not checksum:
+            results[idx] = None
+            continue
+        pending.append((idx, checksum))
+
+    async def _update_from_client(client, pending_list):
+        sub_checksums = [checksum for _, checksum in pending_list]
+        lengths = await client.buffer_lengths(sub_checksums)
+        if not isinstance(lengths, list) or len(lengths) != len(sub_checksums):
+            return pending_list
+        new_pending = []
+        for (idx, _checksum), length in zip(pending_list, lengths):
+            if isinstance(length, int) and length >= 0:
+                results[idx] = length
+            else:
+                new_pending.append((idx, _checksum))
+        return new_pending
+
+    for client in _read_folders_clients:
+        if not pending:
+            return results
+        try:
+            pending = await _update_from_client(client, pending)
+        except Exception:
+            continue
+
+    for client in _read_server_clients:
+        if not pending:
+            return results
+        try:
+            pending = await _update_from_client(client, pending)
+        except Exception:
+            continue
+
+    return results
+
+
 async def get_filename(checksum: Checksum) -> str | None:
     """Get the filename where a buffer is stored.
     This can only be provided by a buffer read folder.
