@@ -117,3 +117,8 @@ async def run_transformation(
             scratch=scratch,
         )
     raise RuntimeError("Unreachable")
+
+
+def ensure_initialized():
+    for client in _launched_clients.values():
+        client.ensure_initialized_sync()

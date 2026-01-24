@@ -154,4 +154,9 @@ def deactivate() -> None:
     set_seamless_dask_client(None)
 
 
-__all__ = ["activate", "deactivate", "DaskserverLaunchedHandle"]
+def ensure_initialized():
+    # In this case, RAII
+    pass
+
+
+__all__ = ["activate", "deactivate", "DaskserverLaunchedHandle", "ensure_initialized"]

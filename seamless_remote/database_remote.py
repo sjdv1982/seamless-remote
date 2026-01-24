@@ -169,3 +169,8 @@ async def set_transformation_result(tf_checksum: Checksum, result_checksum: Chec
         if ok:
             written = True
     return written
+
+
+def ensure_initialized():
+    for client in _launched_clients.values():
+        client.ensure_initialized_sync()

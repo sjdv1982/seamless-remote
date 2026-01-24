@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -138,22 +139,27 @@ try:
     However, we must interject overrulings of the execution command,
     based on the args
     """
-    from seamless_config import change_stage, set_workdir
-    from seamless_config.config_files import load_config_files
-    from seamless_config.select import (
-        select_execution,
-        get_selected_cluster,
-    )
 
-    set_workdir(os.getcwd())
-    load_config_files()
-    if get_selected_cluster() is None:
-        print(f"Cannot resolve without a cluster defined", file=sys.stderr)
-        exit(1)
+    from seamless_config.extern_clients import set_remote_clients_from_env
 
-    select_execution("process")
-    seamless_remote.database_remote.DISABLED = True
-    change_stage()
+    if not set_remote_clients_from_env(include_dask=False):
+
+        from seamless_config import change_stage, set_workdir
+        from seamless_config.config_files import load_config_files
+        from seamless_config.select import (
+            select_execution,
+            get_selected_cluster,
+        )
+
+        set_workdir(os.getcwd())
+        load_config_files()
+        if get_selected_cluster() is None:
+            print(f"Cannot resolve without a cluster defined", file=sys.stderr)
+            exit(1)
+
+        select_execution("process")
+        seamless_remote.database_remote.DISABLED = True
+        change_stage()
     # /CONFIG
 
     buffer = checksum.resolve()
