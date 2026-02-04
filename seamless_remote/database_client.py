@@ -107,8 +107,7 @@ class DatabaseClient(Client):
                     return None
                 text = await response.text()
                 raise ClientConnectionError(f"Error {response.status}: {text}")
-
-        result0 = await response.text()
+            result0 = await response.text()
         return Checksum(result0)
 
     @_retry_operation
