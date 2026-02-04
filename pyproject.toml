@@ -7,4 +7,4 @@ name = "seamless-remote"
 version = "0.0.0"
 
 [tool.setuptools]
-script-files = ["bin/seamless-resolve"]
+script-files = ["bin/seamless-resolve", "bin/seamless-fingertip"]
