@@ -160,6 +160,21 @@ async def get_transformation_result(tf_checksum: Checksum) -> Checksum | None:
             return result
 
 
+async def get_rev_transformations(
+    result_checksum: Checksum,
+) -> list[Checksum] | None:
+    """Return transformations that produce result_checksum, if known."""
+
+    result_checksum = Checksum(result_checksum)
+
+    for client in _read_database_clients:
+        _debug(f"query {client} for rev {result_checksum.hex()}")
+        result = await client.get_rev_transformations(result_checksum)
+        _debug(f"client {client} returned {result}")
+        if result is not None:
+            return result
+
+
 async def set_transformation_result(tf_checksum: Checksum, result_checksum: Checksum):
     """Write the transformation result to remote databases"""
     tf_checksum = Checksum(tf_checksum)
@@ -169,6 +184,18 @@ async def set_transformation_result(tf_checksum: Checksum, result_checksum: Chec
         if ok:
             written = True
     return written
+
+
+async def undo_transformation_result(tf_checksum: Checksum, result_checksum: Checksum):
+    """Contest a transformation result in remote databases."""
+    tf_checksum = Checksum(tf_checksum)
+    result_checksum = Checksum(result_checksum)
+    undone = False
+    for client in _write_database_clients:
+        ok = await client.undo_transformation_result(tf_checksum, result_checksum)
+        if ok:
+            undone = True
+    return undone
 
 
 def ensure_initialized():

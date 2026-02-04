@@ -1,6 +1,7 @@
 """Async client for Seamless databases."""
 
 import asyncio
+import json
 import os
 import sys
 from aiohttp import ClientConnectionError
@@ -107,8 +108,51 @@ class DatabaseClient(Client):
                 text = await response.text()
                 raise ClientConnectionError(f"Error {response.status}: {text}")
 
-            result0 = await response.text()
+        result0 = await response.text()
         return Checksum(result0)
+
+    @_retry_operation
+    async def get_rev_transformations(
+        self, result_checksum: Checksum
+    ) -> list[Checksum] | None:
+        """Return transformations that produce result_checksum, if known."""
+        semaphore = self._get_semaphore()
+        if semaphore is None:
+            return await self._get_rev_transformations_unthrottled(result_checksum)
+
+        await semaphore.acquire()
+        try:
+            return await self._get_rev_transformations_unthrottled(result_checksum)
+        finally:
+            semaphore.release()
+
+    async def _get_rev_transformations_unthrottled(
+        self, result_checksum: Checksum
+    ) -> list[Checksum] | None:
+        session_async = self._get_session()
+        result_checksum = Checksum(result_checksum)
+        request = {"type": "rev_transformations", "checksum": result_checksum.hex()}
+        path = self._require_url()
+        async with session_async.get(path, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                if response.status == 404:
+                    return None
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        try:
+            payload = json.loads(result0)
+        except Exception as exc:
+            raise ClientConnectionError(
+                f"Malformed response for rev_transformations: {result0!r}"
+            ) from exc
+        if payload is None:
+            return None
+        if not isinstance(payload, list):
+            raise ClientConnectionError(
+                f"Malformed response for rev_transformations: {payload!r}"
+            )
+        return [Checksum(item) for item in payload]
 
     @_retry_operation
     async def set_transformation_result(
@@ -131,6 +175,29 @@ class DatabaseClient(Client):
             if int(response.status / 100) in (4, 5):
                 text = await response.text()
                 raise ClientConnectionError(f"Error {response.status}: {text}")
+
+    @_retry_operation
+    async def undo_transformation_result(
+        self, tf_checksum: Checksum, result_checksum: Checksum
+    ) -> bool:
+        """Contest a transformation result in the database."""
+        if self.readonly:
+            raise AttributeError("Read-only database client")
+        session_async = self._get_session()
+        tf_checksum = Checksum(tf_checksum)
+        result_checksum = Checksum(result_checksum)
+
+        request = {
+            "type": "contest",
+            "checksum": tf_checksum.hex(),
+            "result": result_checksum.hex(),
+        }
+        path = self._require_url()
+        async with session_async.put(path, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+        return True
 
 
 _launcher_cache = lrucache(1000)
