@@ -10,7 +10,7 @@ from typing import Optional
 
 import aiofiles
 import aiofiles.os
-from aiohttp import ClientConnectionError, ClientPayloadError, ClientTimeout
+from aiohttp import ClientConnectionError, ClientPayloadError
 from frozendict import frozendict
 
 from seamless import Buffer, Checksum
@@ -152,7 +152,7 @@ class BufferClient(Client):
         curr_buf_checksum = None
         while 1:
             path = self._require_url() + "/" + str(checksum)
-            async with session_async.get(path, timeout=ClientTimeout(10)) as response:
+            async with session_async.get(path) as response:
                 if int(response.status) == 404:
                     return None
                 if int(response.status / 100) in (4, 5):
@@ -184,7 +184,7 @@ class BufferClient(Client):
         session_async = self._get_session()
         checksum = Checksum(checksum)
         path = self._require_url() + "/promise/" + str(checksum)
-        async with session_async.put(path) as response:
+        async with session_async.put(path, timeout=self._request_timeout()) as response:
             if int(response.status / 100) in (4, 5):
                 text = await response.text()
                 raise ClientConnectionError(f"Error {response.status}: {text}")
@@ -202,7 +202,9 @@ class BufferClient(Client):
         buffer_bytes = Buffer(buffer).content
         assert checksum
         path = self._require_url() + "/" + str(checksum)
-        async with session_async.put(path, data=buffer_bytes) as response:
+        async with session_async.put(
+            path, data=buffer_bytes, timeout=self._request_timeout()
+        ) as response:
             if int(response.status / 100) in (4, 5):
                 text = await response.text()
                 raise ClientConnectionError(f"Error {response.status}: {text}")

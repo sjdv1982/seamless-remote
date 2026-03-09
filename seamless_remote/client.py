@@ -22,6 +22,54 @@ RETRYABLE_EXCEPTIONS = (
 )
 
 _ALLOW_REMOTE_CLIENTS_ENV = "SEAMLESS_ALLOW_REMOTE_CLIENTS_IN_WORKER"
+_CONNECT_TIMEOUT_ENV = "SEAMLESS_REMOTE_CONNECT_TIMEOUT"
+_READ_TIMEOUT_ENV = "SEAMLESS_REMOTE_READ_TIMEOUT"
+_TOTAL_TIMEOUT_ENV = "SEAMLESS_REMOTE_TOTAL_TIMEOUT"
+_HEALTHCHECK_TIMEOUT_ENV = "SEAMLESS_REMOTE_HEALTHCHECK_TIMEOUT"
+
+
+def _parse_timeout_setting(value: str | None) -> float | None:
+    if value is None:
+        return None
+    value = value.strip().lower()
+    if not value:
+        return None
+    if value in {"none", "off", "false"}:
+        return None
+    timeout = float(value)
+    if timeout <= 0:
+        return None
+    return timeout
+
+
+def _get_timeout_setting(env_name: str, default: float | None) -> float | None:
+    raw_value = os.environ.get(env_name)
+    if raw_value is None:
+        return default
+    try:
+        parsed_value = _parse_timeout_setting(raw_value)
+    except ValueError:
+        return default
+    if parsed_value is None:
+        return None
+    return parsed_value
+
+
+_CONNECT_TIMEOUT = _get_timeout_setting(_CONNECT_TIMEOUT_ENV, 10.0)
+_READ_TIMEOUT = _get_timeout_setting(_READ_TIMEOUT_ENV, 10.0)
+_TOTAL_TIMEOUT = _get_timeout_setting(_TOTAL_TIMEOUT_ENV, None)
+_HEALTHCHECK_TIMEOUT = _get_timeout_setting(_HEALTHCHECK_TIMEOUT_ENV, 10.0)
+
+
+def _build_request_timeout(*, healthcheck: bool = False) -> aiohttp.ClientTimeout:
+    if healthcheck:
+        return aiohttp.ClientTimeout(total=_HEALTHCHECK_TIMEOUT)
+    return aiohttp.ClientTimeout(
+        total=_TOTAL_TIMEOUT,
+        connect=_CONNECT_TIMEOUT,
+        sock_connect=_CONNECT_TIMEOUT,
+        sock_read=_READ_TIMEOUT,
+    )
 
 _clients = weakref.WeakSet()
 _keepalive_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -143,6 +191,14 @@ class Client:
             raise ValueError("No url configured for this client")
         return self.url
 
+    def _request_timeout(self) -> aiohttp.ClientTimeout:
+        """Default timeout policy for non-healthcheck requests."""
+        return _build_request_timeout()
+
+    def _healthcheck_timeout(self) -> aiohttp.ClientTimeout:
+        """Timeout policy for healthchecks."""
+        return _build_request_timeout(healthcheck=True)
+
     def _get_session(self) -> aiohttp.ClientSession:
         self._require_url()
         thread = threading.current_thread()
@@ -163,7 +219,7 @@ class Client:
                 _close_session(session_async)
                 session_async = None
         if session_async is None:
-            timeout = aiohttp.ClientTimeout(total=10)
+            timeout = self._request_timeout()
             session_async = aiohttp.ClientSession(timeout=timeout)
             self._sessions[thread] = session_async
             try:
@@ -179,10 +235,11 @@ class Client:
             return
         session_async = self._get_session()
         path = self._require_url() + "/healthcheck"
-        from aiohttp import ClientTimeout
 
         try:
-            async with session_async.get(path, timeout=ClientTimeout(10)) as response:
+            async with session_async.get(
+                path, timeout=self._healthcheck_timeout()
+            ) as response:
                 if not (200 <= response.status < 300):
                     text = await response.text()
                     raise RuntimeError(
