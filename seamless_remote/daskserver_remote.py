@@ -87,6 +87,7 @@ class DaskserverLaunchedHandle:
         import remote_http_launcher
 
         conf = self.launch_config
+        assert conf.get("conda") is not None
         frozenconf = _freeze_mapping(conf)
         payload = _launcher_cache.get(frozenconf)
         if payload is None:
