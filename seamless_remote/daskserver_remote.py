@@ -28,6 +28,19 @@ def _freeze_mapping(mapping: Dict[str, Any]) -> frozendict:
     return frozendict({k: _freeze(v) for k, v in mapping.items()})
 
 
+def _parse_interactive(value: Any) -> bool:
+    """Parse queue 'interactive' values conservatively."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("1", "true", "yes", "on"):
+            return True
+        if normalized in ("0", "false", "no", "off", ""):
+            return False
+    return False
+
+
 class DaskserverLaunchedHandle:
     """Synchronous launcher that yields a SeamlessDaskClient."""
 
@@ -78,10 +91,7 @@ class DaskserverLaunchedHandle:
             self.cores = int(file_params.get("cores") or 1)
         except Exception:
             self.cores = 1
-        try:
-            self.interactive = bool(file_params.get("interactive"))
-        except Exception:
-            self.interactive = False
+        self.interactive = _parse_interactive(file_params.get("interactive"))
 
     def _do_init(self) -> None:
         import remote_http_launcher
