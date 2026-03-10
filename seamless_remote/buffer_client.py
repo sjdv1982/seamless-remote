@@ -194,9 +194,9 @@ class BufferClient(Client):
         """Upload a buffer to the configured server."""
         if self.readonly:
             raise AttributeError("Read-only buffer client")
-        await self._write_unthrottled(checksum, buffer)
+        return await self._write_unthrottled(checksum, buffer)
 
-    async def _write_unthrottled(self, checksum: Checksum, buffer: Buffer) -> None:
+    async def _write_unthrottled(self, checksum: Checksum, buffer: Buffer) -> bool:
         session_async = self._get_session()
         checksum = Checksum(checksum)
         buffer_bytes = Buffer(buffer).content
@@ -208,6 +208,7 @@ class BufferClient(Client):
             if int(response.status / 100) in (4, 5):
                 text = await response.text()
                 raise ClientConnectionError(f"Error {response.status}: {text}")
+        return True
 
     @_retry_operation
     async def get_file_buffer(
