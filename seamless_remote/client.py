@@ -56,7 +56,8 @@ def _get_timeout_setting(env_name: str, default: float | None) -> float | None:
 
 
 _CONNECT_TIMEOUT = _get_timeout_setting(_CONNECT_TIMEOUT_ENV, 10.0)
-_READ_TIMEOUT = _get_timeout_setting(_READ_TIMEOUT_ENV, 10.0)
+# Hashserver may pre-validate checksum before sending first bytes; keep this generous.
+_READ_TIMEOUT = _get_timeout_setting(_READ_TIMEOUT_ENV, 1200.0)
 _TOTAL_TIMEOUT = _get_timeout_setting(_TOTAL_TIMEOUT_ENV, None)
 _HEALTHCHECK_TIMEOUT = _get_timeout_setting(_HEALTHCHECK_TIMEOUT_ENV, 10.0)
 
@@ -70,6 +71,7 @@ def _build_request_timeout(*, healthcheck: bool = False) -> aiohttp.ClientTimeou
         sock_connect=_CONNECT_TIMEOUT,
         sock_read=_READ_TIMEOUT,
     )
+
 
 _clients = weakref.WeakSet()
 _keepalive_loop: Optional[asyncio.AbstractEventLoop] = None
