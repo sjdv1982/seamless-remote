@@ -187,7 +187,7 @@ class DatabaseClient(Client):
         result_checksum = Checksum(result_checksum)
 
         request = {
-            "type": "contest",
+            "type": "irreproducible",
             "checksum": tf_checksum.hex(),
             "result": result_checksum.hex(),
         }
