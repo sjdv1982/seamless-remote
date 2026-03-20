@@ -1,4 +1,7 @@
 *.code-workspace
 .vscode/
+**/seamless.profile.yaml
 *.pyc
 *.egg-info/
+build/
+dist/

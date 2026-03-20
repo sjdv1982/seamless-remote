@@ -1,7 +1,7 @@
 - project: myproject
 #
 #
-# example for .seamless.yaml:
+# example for seamless.profile.yaml:
 #- stage test:
 #    - cluster: remote
 #
