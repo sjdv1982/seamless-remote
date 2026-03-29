@@ -6,6 +6,7 @@ from frozendict import frozendict
 
 from seamless import Checksum
 from seamless.util.pylru import lrucache
+from seamless_transformer.remote_job import parse_remote_job_written
 
 from .client import Client, _retry_operation
 
@@ -50,6 +51,8 @@ class JobserverClient(Client):
                 text = await response.text()
                 raise ClientConnectionError(f"Error {response.status}: {text}")
             result0 = await response.text()
+        if parse_remote_job_written(result0) is not None:
+            return result0
         return Checksum(result0)
 
 
