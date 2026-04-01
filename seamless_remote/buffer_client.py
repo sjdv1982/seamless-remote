@@ -68,7 +68,11 @@ class BufferClient(Client):
         path = self._require_url() + "/has"
         async with session_async.get(path, json=[cs]) as response:
             if int(response.status / 100) in (4, 5):
-                raise ClientConnectionError()
+                text = await response.text()
+                raise ClientConnectionError(
+                    f"buffer_length failed for checksum {cs}: "
+                    f"HTTP {response.status} from {path}: {text}"
+                )
             result0 = await response.read()
         try:
             result = json.loads(result0)
@@ -122,7 +126,11 @@ class BufferClient(Client):
         path = self._require_url() + "/has"
         async with session_async.get(path, json=cs_list) as response:
             if int(response.status / 100) in (4, 5):
-                raise ClientConnectionError()
+                text = await response.text()
+                raise ClientConnectionError(
+                    f"buffer_lengths failed for {len(cs_list)} checksums: "
+                    f"HTTP {response.status} from {path}: {text}"
+                )
             result0 = await response.read()
         result = [None] * len(cs_list)
         try:
@@ -156,7 +164,11 @@ class BufferClient(Client):
                 if int(response.status) == 404:
                     return None
                 if int(response.status / 100) in (4, 5):
-                    raise ClientConnectionError()
+                    text = await response.text()
+                    raise ClientConnectionError(
+                        f"GET buffer failed for checksum {checksum}: "
+                        f"HTTP {response.status} from {path}: {text}"
+                    )
                 buf0 = await response.read()
                 buf = Buffer(buf0)
             buf_checksum = buf.get_checksum().hex()
