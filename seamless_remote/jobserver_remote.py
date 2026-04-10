@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 from seamless import Checksum
 
+from .client import ClientRestartRequiredError
 from .jobserver_client import JobserverClient, JobserverLaunchedClient
 
 DISABLED = False  # to disable automatic activation during tests
@@ -110,12 +111,18 @@ async def run_transformation(
         raise RuntimeError("No jobserver clients are available")
     tf_checksum = Checksum(tf_checksum)
     for client in _jobserver_clients:
-        return await client.run_transformation(
-            transformation_dict,
-            tf_checksum=tf_checksum,
-            tf_dunder=tf_dunder,
-            scratch=scratch,
-        )
+        for attempt in range(2):
+            try:
+                return await client.run_transformation(
+                    transformation_dict,
+                    tf_checksum=tf_checksum,
+                    tf_dunder=tf_dunder,
+                    scratch=scratch,
+                )
+            except ClientRestartRequiredError:
+                client.restart()
+                if attempt == 1:
+                    raise
     raise RuntimeError("Unreachable")
 
 

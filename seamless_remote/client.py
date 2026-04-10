@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import threading
 import weakref
 import os
@@ -93,6 +94,40 @@ def _ensure_not_child() -> None:
     ensure_open("remote client", mark_required=False)
 
 
+class ClientRestartRequiredError(RuntimeError):
+    """Transient client-side failure that requires a hard client reset."""
+
+
+def _iter_exception_chain(exc: BaseException):
+    seen: set[int] = set()
+    stack: list[BaseException] = [exc]
+    while stack:
+        current = stack.pop()
+        current_id = id(current)
+        if current_id in seen:
+            continue
+        seen.add(current_id)
+        yield current
+        os_error = getattr(current, "os_error", None)
+        if isinstance(os_error, BaseException):
+            stack.append(os_error)
+        cause = getattr(current, "__cause__", None)
+        if isinstance(cause, BaseException):
+            stack.append(cause)
+        context = getattr(current, "__context__", None)
+        if isinstance(context, BaseException):
+            stack.append(context)
+
+
+def _is_resource_busy_error(exc: BaseException) -> bool:
+    for current in _iter_exception_chain(exc):
+        if isinstance(current, OSError) and getattr(current, "errno", None) == errno.EBUSY:
+            return True
+        if "device or resource busy" in str(current).lower():
+            return True
+    return False
+
+
 def _retry_operation(method: F) -> F:
     """Decorator that retries transient failures after reinitializing the client."""
 
@@ -103,8 +138,11 @@ def _retry_operation(method: F) -> F:
             try:
                 await self._wait_for_init()
                 return await method(self, *args, **kwargs)
+            except ClientRestartRequiredError:
+                if attempt == 4:
+                    raise
             except RETRYABLE_EXCEPTIONS:
-                self._initialized = False
+                self.restart()
                 if attempt == 4:
                     raise
         raise RuntimeError("Unreachable")
@@ -248,6 +286,11 @@ class Client:
                         f"Healthcheck failed for {self.url}: HTTP {response.status} {text}"
                     )
         except ClientConnectionError as exc:
+            if _is_resource_busy_error(exc):
+                self.restart()
+                raise ClientRestartRequiredError(
+                    f"Healthcheck failed for {self.url}: {exc}"
+                ) from exc
             raise RuntimeError(f"Healthcheck failed for {self.url}: {exc}") from exc
         except Exception as exc:
             raise RuntimeError(f"Healthcheck failed for {self.url}: {exc}") from exc
@@ -263,6 +306,11 @@ class Client:
         session = self._sessions.pop(thread, None)
         if session is not None:
             _close_session(session)
+
+    def restart(self):
+        """Drop client sessions and force reinitialization on the next request."""
+        self._initialized = False
+        self._close_sessions()
 
 
 def close_all_clients():
@@ -443,6 +491,7 @@ def _keepalive_thread_main() -> None:
 
 __all__ = [
     "Client",
+    "ClientRestartRequiredError",
     "RETRYABLE_EXCEPTIONS",
     "_retry_operation",
     "_close_session",
