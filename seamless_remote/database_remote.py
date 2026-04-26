@@ -187,6 +187,16 @@ async def get_execution_record(tf_checksum: Checksum) -> dict | None:
             return result
 
 
+async def get_bucket_probe(bucket_kind: str, label: str) -> dict | None:
+    """Return the current shared probe-index row for a bucket label, if known."""
+    for client in _read_database_clients:
+        _debug(f"query {client} for bucket_probe {bucket_kind} {label!r}")
+        result = await client.get_bucket_probe(bucket_kind, label)
+        _debug(f"client {client} returned {result}")
+        if result is not None:
+            return result
+
+
 async def get_irreproducible_records(
     tf_checksum: Checksum, result_checksum: Checksum | None = None
 ) -> list[dict] | None:
@@ -224,6 +234,25 @@ async def set_execution_record(
     written = False
     for client in _write_database_clients:
         ok = await client.set_execution_record(tf_checksum, result_checksum, record)
+        if ok is not False:
+            written = True
+    return written
+
+
+async def set_bucket_probe(
+    bucket_kind: str,
+    label: str,
+    bucket_checksum: Checksum,
+    freshness_tokens: dict,
+    captured_at: str,
+):
+    """Write or refresh the current shared probe-index row for a bucket label."""
+    bucket_checksum = Checksum(bucket_checksum)
+    written = False
+    for client in _write_database_clients:
+        ok = await client.set_bucket_probe(
+            bucket_kind, label, bucket_checksum, freshness_tokens, captured_at
+        )
         if ok is not False:
             written = True
     return written

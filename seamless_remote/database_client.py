@@ -190,6 +190,41 @@ class DatabaseClient(Client):
         return payload
 
     @_retry_operation
+    async def get_bucket_probe(self, bucket_kind: str, label: str) -> dict | None:
+        """Return the current shared probe-index row for a bucket label, if known."""
+        semaphore = self._get_semaphore()
+        if semaphore is None:
+            return await self._get_bucket_probe_unthrottled(bucket_kind, label)
+
+        await semaphore.acquire()
+        try:
+            return await self._get_bucket_probe_unthrottled(bucket_kind, label)
+        finally:
+            semaphore.release()
+
+    async def _get_bucket_probe_unthrottled(
+        self, bucket_kind: str, label: str
+    ) -> dict | None:
+        session_async = self._get_session()
+        request = {"type": "bucket_probe", "bucket_kind": bucket_kind, "label": label}
+        path = self._require_url()
+        async with session_async.get(path, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                if response.status == 404:
+                    return None
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        payload = json.loads(result0)
+        if payload is None:
+            return None
+        if not isinstance(payload, dict):
+            raise ClientConnectionError(
+                f"Malformed response for bucket_probe: {payload!r}"
+            )
+        return payload
+
+    @_retry_operation
     async def get_irreproducible_records(
         self, tf_checksum: Checksum, result_checksum: Checksum | None = None
     ) -> list[dict] | None:
@@ -271,6 +306,35 @@ class DatabaseClient(Client):
             "checksum": tf_checksum.hex(),
             "result": result_checksum.hex(),
             "value": record,
+        }
+        path = self._require_url()
+        async with session_async.put(path, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+
+    @_retry_operation
+    async def set_bucket_probe(
+        self,
+        bucket_kind: str,
+        label: str,
+        bucket_checksum: Checksum,
+        freshness_tokens: dict,
+        captured_at: str,
+    ):
+        """Store or refresh the current shared probe-index row for a bucket label."""
+        if self.readonly:
+            raise AttributeError("Read-only database client")
+        session_async = self._get_session()
+        bucket_checksum = Checksum(bucket_checksum)
+
+        request = {
+            "type": "bucket_probe",
+            "bucket_kind": bucket_kind,
+            "label": label,
+            "bucket_checksum": bucket_checksum.hex(),
+            "freshness_tokens": freshness_tokens,
+            "captured_at": captured_at,
         }
         path = self._require_url()
         async with session_async.put(path, json=request) as response:

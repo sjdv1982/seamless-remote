@@ -55,6 +55,7 @@ from seamless_remote.database_client import DatabaseClient  # noqa: E402
 
 TF_CHECKSUM = "1" * 64
 RESULT_CHECKSUM = "2" * 64
+BUCKET_CHECKSUM = "3" * 64
 
 
 def _record():
@@ -101,13 +102,16 @@ class _FakeRequest:
         self.request = request
 
     async def __aenter__(self):
+        checksum = self.request.get("checksum")
+        if self.request["type"] == "bucket_probe":
+            checksum = None
         if self.method == "GET":
             payload = await self.server._get(
-                self.request["type"], self.request["checksum"], self.request
+                self.request["type"], checksum, self.request
             )
         else:
             payload = await self.server._put(
-                self.request["type"], self.request["checksum"], self.request
+                self.request["type"], checksum, self.request
             )
         if isinstance(payload, web.Response):
             text = payload.text
@@ -175,4 +179,46 @@ class DatabaseClientExecutionRecordTests(unittest.IsolatedAsyncioTestCase):
                 TF_CHECKSUM, RESULT_CHECKSUM
             ),
             records,
+        )
+
+    async def test_bucket_probe_roundtrip_and_overwrite(self):
+        probe = {
+            "bucket_kind": "environment",
+            "label": "conda:/envs/seamless1",
+            "bucket_checksum": BUCKET_CHECKSUM,
+            "captured_at": "2026-04-26T12:00:00Z",
+            "freshness_tokens": {"conda_meta_mtime": 123},
+        }
+        await self.client.set_bucket_probe(
+            probe["bucket_kind"],
+            probe["label"],
+            probe["bucket_checksum"],
+            probe["freshness_tokens"],
+            probe["captured_at"],
+        )
+        self.assertEqual(
+            await self.client.get_bucket_probe(
+                probe["bucket_kind"], probe["label"]
+            ),
+            probe,
+        )
+
+        updated_probe = {
+            **probe,
+            "bucket_checksum": "4" * 64,
+            "captured_at": "2026-04-26T12:05:00Z",
+            "freshness_tokens": {"conda_meta_mtime": 456},
+        }
+        await self.client.set_bucket_probe(
+            updated_probe["bucket_kind"],
+            updated_probe["label"],
+            updated_probe["bucket_checksum"],
+            updated_probe["freshness_tokens"],
+            updated_probe["captured_at"],
+        )
+        self.assertEqual(
+            await self.client.get_bucket_probe(
+                updated_probe["bucket_kind"], updated_probe["label"]
+            ),
+            updated_probe,
         )
