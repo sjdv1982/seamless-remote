@@ -154,6 +154,86 @@ class DatabaseClient(Client):
         return [Checksum(item) for item in payload]
 
     @_retry_operation
+    async def get_execution_record(self, tf_checksum: Checksum) -> dict | None:
+        """Return the canonical execution record for a transformation, if known."""
+        semaphore = self._get_semaphore()
+        if semaphore is None:
+            return await self._get_execution_record_unthrottled(tf_checksum)
+
+        await semaphore.acquire()
+        try:
+            return await self._get_execution_record_unthrottled(tf_checksum)
+        finally:
+            semaphore.release()
+
+    async def _get_execution_record_unthrottled(
+        self, tf_checksum: Checksum
+    ) -> dict | None:
+        session_async = self._get_session()
+        tf_checksum = Checksum(tf_checksum)
+        request = {"type": "metadata", "checksum": tf_checksum.hex()}
+        path = self._require_url()
+        async with session_async.get(path, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                if response.status == 404:
+                    return None
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        payload = json.loads(result0)
+        if payload is None:
+            return None
+        if not isinstance(payload, dict):
+            raise ClientConnectionError(
+                f"Malformed response for metadata: {payload!r}"
+            )
+        return payload
+
+    @_retry_operation
+    async def get_irreproducible_records(
+        self, tf_checksum: Checksum, result_checksum: Checksum | None = None
+    ) -> list[dict] | None:
+        """Return irreproducible rows for a transformation, optionally filtered by result."""
+        semaphore = self._get_semaphore()
+        if semaphore is None:
+            return await self._get_irreproducible_records_unthrottled(
+                tf_checksum, result_checksum
+            )
+
+        await semaphore.acquire()
+        try:
+            return await self._get_irreproducible_records_unthrottled(
+                tf_checksum, result_checksum
+            )
+        finally:
+            semaphore.release()
+
+    async def _get_irreproducible_records_unthrottled(
+        self, tf_checksum: Checksum, result_checksum: Checksum | None = None
+    ) -> list[dict] | None:
+        session_async = self._get_session()
+        tf_checksum = Checksum(tf_checksum)
+        request = {"type": "irreproducible", "checksum": tf_checksum.hex()}
+        if result_checksum is not None:
+            request["result"] = Checksum(result_checksum).hex()
+        path = self._require_url()
+        async with session_async.get(path, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                if response.status == 404:
+                    return None
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        payload = json.loads(result0)
+        if payload is None:
+            return None
+        if not isinstance(payload, list):
+            raise ClientConnectionError(
+                f"Malformed response for irreproducible: {payload!r}"
+            )
+        return payload
+
+    @_retry_operation
     async def set_transformation_result(
         self, tf_checksum: Checksum, result_checksum: Checksum
     ):
@@ -168,6 +248,29 @@ class DatabaseClient(Client):
             "type": "transformation",
             "checksum": tf_checksum.hex(),
             "value": result_checksum.hex(),
+        }
+        path = self._require_url()
+        async with session_async.put(path, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+
+    @_retry_operation
+    async def set_execution_record(
+        self, tf_checksum: Checksum, result_checksum: Checksum, record: dict
+    ):
+        """Store the canonical execution record for a transformation."""
+        if self.readonly:
+            raise AttributeError("Read-only database client")
+        session_async = self._get_session()
+        tf_checksum = Checksum(tf_checksum)
+        result_checksum = Checksum(result_checksum)
+
+        request = {
+            "type": "metadata",
+            "checksum": tf_checksum.hex(),
+            "result": result_checksum.hex(),
+            "value": record,
         }
         path = self._require_url()
         async with session_async.put(path, json=request) as response:

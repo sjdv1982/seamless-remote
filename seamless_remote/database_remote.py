@@ -175,6 +175,35 @@ async def get_rev_transformations(
             return result
 
 
+async def get_execution_record(tf_checksum: Checksum) -> dict | None:
+    """Return the canonical execution record for a transformation, if known."""
+    tf_checksum = Checksum(tf_checksum)
+
+    for client in _read_database_clients:
+        _debug(f"query {client} for metadata {tf_checksum.hex()}")
+        result = await client.get_execution_record(tf_checksum)
+        _debug(f"client {client} returned {result}")
+        if result is not None:
+            return result
+
+
+async def get_irreproducible_records(
+    tf_checksum: Checksum, result_checksum: Checksum | None = None
+) -> list[dict] | None:
+    """Return irreproducible rows for a transformation, optionally filtered by result."""
+    tf_checksum = Checksum(tf_checksum)
+    result_checksum = (
+        None if result_checksum is None else Checksum(result_checksum)
+    )
+
+    for client in _read_database_clients:
+        _debug(f"query {client} for irreproducible {tf_checksum.hex()}")
+        result = await client.get_irreproducible_records(tf_checksum, result_checksum)
+        _debug(f"client {client} returned {result}")
+        if result is not None:
+            return result
+
+
 async def set_transformation_result(tf_checksum: Checksum, result_checksum: Checksum):
     """Write the transformation result to remote databases"""
     tf_checksum = Checksum(tf_checksum)
@@ -182,6 +211,20 @@ async def set_transformation_result(tf_checksum: Checksum, result_checksum: Chec
     for client in _write_database_clients:
         ok = await client.set_transformation_result(tf_checksum, result_checksum)
         if ok:
+            written = True
+    return written
+
+
+async def set_execution_record(
+    tf_checksum: Checksum, result_checksum: Checksum, record: dict
+):
+    """Write the canonical execution record to remote databases."""
+    tf_checksum = Checksum(tf_checksum)
+    result_checksum = Checksum(result_checksum)
+    written = False
+    for client in _write_database_clients:
+        ok = await client.set_execution_record(tf_checksum, result_checksum, record)
+        if ok is not False:
             written = True
     return written
 
