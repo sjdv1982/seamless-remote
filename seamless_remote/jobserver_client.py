@@ -1,5 +1,6 @@
 """Async client for Seamless jobservers."""
 
+import json
 import sys
 from aiohttp import ClientConnectionError
 from frozendict import frozendict
@@ -51,6 +52,20 @@ class JobserverClient(Client):
                 text = await response.text()
                 raise ClientConnectionError(f"Error {response.status}: {text}")
             result0 = await response.text()
+        try:
+            payload = json.loads(result0)
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            result_checksum = payload.get("result_checksum")
+            if not isinstance(result_checksum, str):
+                raise ClientConnectionError(
+                    f"Malformed jobserver success payload: {payload!r}"
+                )
+            return {
+                "result_checksum": Checksum(result_checksum),
+                "probe_context": payload.get("probe_context"),
+            }
         if parse_remote_job_written(result0) is not None:
             return result0
         return Checksum(result0)
