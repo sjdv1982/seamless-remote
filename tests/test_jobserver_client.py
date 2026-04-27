@@ -79,8 +79,8 @@ class JobserverClientTests(unittest.IsolatedAsyncioTestCase):
         client.url = "http://jobserver.invalid"
         client._initialized = True
         client._get_session = lambda: _FakeSession(
-            '{"result_checksum": "%s", "probe_context": {"required_bucket_checksums": {"node": "%s"}}}'
-            % ("2" * 64, "3" * 64)
+            '{"result_checksum": "%s", "probe_context": {"required_bucket_checksums": {"node": "%s"}}, "compilation_context": "%s"}'
+            % ("2" * 64, "3" * 64, "4" * 64)
         )
 
         result = await client.run_transformation(
@@ -95,3 +95,4 @@ class JobserverClientTests(unittest.IsolatedAsyncioTestCase):
             result["probe_context"],
             {"required_bucket_checksums": {"node": "3" * 64}},
         )
+        self.assertEqual(result["compilation_context"], "4" * 64)
