@@ -67,6 +67,7 @@ class JobserverClient(Client):
                 "probe_context": payload.get("probe_context"),
                 "compilation_context": payload.get("compilation_context"),
                 "job_validation": payload.get("job_validation"),
+                "record_runtime": payload.get("record_runtime"),
             }
         if parse_remote_job_written(result0) is not None:
             return result0
