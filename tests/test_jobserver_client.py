@@ -122,3 +122,23 @@ class JobserverClientTests(unittest.IsolatedAsyncioTestCase):
                 "retry_count": 1,
             },
         )
+
+    async def test_run_transformation_parses_structured_remote_job_payload(self):
+        client = JobserverClient()
+        client.url = "http://jobserver.invalid"
+        client._initialized = True
+        client._get_session = lambda: _FakeSession(
+            '{"remote_job_written": "REMOTE_JOB_WRITTEN:/tmp/jobdir"}'
+        )
+
+        result = await client.run_transformation(
+            {"__language__": "bash"},
+            tf_checksum="1" * 64,
+            tf_dunder={},
+            scratch=False,
+        )
+
+        self.assertEqual(
+            result,
+            {"remote_job_written": "REMOTE_JOB_WRITTEN:/tmp/jobdir", "record_runtime": None},
+        )

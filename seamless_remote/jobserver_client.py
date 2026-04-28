@@ -57,6 +57,12 @@ class JobserverClient(Client):
         except Exception:
             payload = None
         if isinstance(payload, dict):
+            remote_job_written = payload.get("remote_job_written")
+            if isinstance(remote_job_written, str):
+                return {
+                    "remote_job_written": remote_job_written,
+                    "record_runtime": payload.get("record_runtime"),
+                }
             result_checksum = payload.get("result_checksum")
             if not isinstance(result_checksum, str):
                 raise ClientConnectionError(
