@@ -7,6 +7,7 @@ from frozendict import frozendict
 
 from seamless import Checksum
 from seamless.util.pylru import lrucache
+from seamless_transformer.record_runtime import get_record_mode
 from seamless_transformer.remote_job import parse_remote_job_written
 
 from .client import Client, _retry_operation
@@ -44,6 +45,7 @@ class JobserverClient(Client):
             "tf_checksum": tf_checksum.hex(),
             "tf_dunder": tf_dunder,
             "scratch": bool(scratch),
+            "record": get_record_mode(),
         }
 
         path = self._require_url() + "/run-transformation"
