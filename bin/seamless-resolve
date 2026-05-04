@@ -52,6 +52,20 @@ def read_checksum_file(filename) -> str | None:
         return None
 
 
+def parse_checksum_argument(value: str) -> Checksum:
+    """Parse a literal checksum, falling back to a checksum file."""
+    try:
+        return Checksum(value)
+    except Exception:
+        pass
+    if os.path.exists(value):
+        checksum_hex = read_checksum_file(value)
+        if not checksum_hex:
+            raise ValueError(f"Invalid checksum file '{value}'")
+        return Checksum(checksum_hex)
+    return Checksum(value)
+
+
 def _configure_logging(*, debug: bool, verbose: bool) -> None:
     logging.basicConfig()
     if debug:
@@ -101,13 +115,7 @@ parser.add_argument("--output", help="Output file (default: stdout)")
 
 args = parser.parse_args()
 
-if os.path.exists(args.checksum):
-    checksum_hex = read_checksum_file(args.checksum)
-    if not checksum_hex:
-        raise ValueError(f"Invalid checksum file '{args.checksum}'")
-    checksum = Checksum(checksum_hex)
-else:
-    checksum = Checksum(args.checksum)
+checksum = parse_checksum_argument(args.checksum)
 
 _configure_logging(debug=args.debug, verbose=args.verbose)
 if args.project:
@@ -167,7 +175,7 @@ try:
     if args.output:
         try:
             with open(args.output, "wb") as output_file:
-                output_file.write(buffer)
+                output_file.write(buffer.content)
         except Exception as exc:
             print(f"Cannot write output file '{args.output}': {exc}", file=sys.stderr)
             exit(1)

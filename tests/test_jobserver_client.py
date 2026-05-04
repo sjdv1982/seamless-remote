@@ -45,8 +45,12 @@ sys.modules["seamless.util.pylru"] = _seamless_pylru
 _remote_job = ModuleType("seamless_transformer.remote_job")
 _remote_job.parse_remote_job_written = lambda value: None
 sys.modules["seamless_transformer.remote_job"] = _remote_job
+_record_runtime = ModuleType("seamless_transformer.record_runtime")
+_record_runtime.get_record_mode = lambda: False
+sys.modules["seamless_transformer.record_runtime"] = _record_runtime
 
 from seamless_remote.jobserver_client import JobserverClient  # noqa: E402
+import seamless_remote.jobserver_client as jobserver_client  # noqa: E402
 
 
 class _Response(AbstractAsyncContextManager):
@@ -67,9 +71,10 @@ class _Response(AbstractAsyncContextManager):
 class _FakeSession:
     def __init__(self, text):
         self.text = text
+        self.requests = []
 
     def get(self, path, json=None):
-        del path, json
+        self.requests.append((path, json))
         return _Response(text=self.text)
 
 
@@ -122,6 +127,27 @@ class JobserverClientTests(unittest.IsolatedAsyncioTestCase):
                 "retry_count": 1,
             },
         )
+
+    async def test_run_transformation_sends_record_mode(self):
+        client = JobserverClient()
+        client.url = "http://jobserver.invalid"
+        client._initialized = True
+        session = _FakeSession('{"result_checksum": "%s"}' % ("2" * 64))
+        client._get_session = lambda: session
+
+        old_get_record_mode = jobserver_client.get_record_mode
+        try:
+            jobserver_client.get_record_mode = lambda: True
+            await client.run_transformation(
+                {"__language__": "python"},
+                tf_checksum="1" * 64,
+                tf_dunder={},
+                scratch=False,
+            )
+        finally:
+            jobserver_client.get_record_mode = old_get_record_mode
+
+        self.assertEqual(session.requests[0][1]["record"], True)
 
     async def test_run_transformation_parses_structured_remote_job_payload(self):
         client = JobserverClient()
