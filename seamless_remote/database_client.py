@@ -311,6 +311,12 @@ class DatabaseClient(Client):
         async with session_async.put(path, json=request) as response:
             if int(response.status / 100) in (4, 5):
                 text = await response.text()
+                if (
+                    response.status == 409
+                    and "Execution record already exists with different metadata"
+                    in text
+                ):
+                    return False
                 raise ClientConnectionError(f"Error {response.status}: {text}")
 
     @_retry_operation
