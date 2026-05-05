@@ -181,6 +181,20 @@ class DatabaseClientExecutionRecordTests(unittest.IsolatedAsyncioTestCase):
             records,
         )
 
+    async def test_duplicate_execution_record_conflict_is_nonfatal(self):
+        record = _record()
+        changed_record = {**record, "checksum_fields": ["environment"]}
+
+        result = await self.client.set_execution_record(
+            TF_CHECKSUM, RESULT_CHECKSUM, record
+        )
+        self.assertIsNone(result)
+        result = await self.client.set_execution_record(
+            TF_CHECKSUM, RESULT_CHECKSUM, changed_record
+        )
+        self.assertIs(result, False)
+        self.assertEqual(await self.client.get_execution_record(TF_CHECKSUM), record)
+
     async def test_bucket_probe_roundtrip_and_overwrite(self):
         probe = {
             "bucket_kind": "environment",
