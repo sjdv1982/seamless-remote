@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from typing import Any, Dict
 
 from seamless import Checksum
@@ -114,18 +116,84 @@ async def run_transformation(
     for client in _jobserver_clients:
         for attempt in range(2):
             try:
-                return await client.run_transformation(
-                    transformation_dict,
-                    tf_checksum=tf_checksum,
-                    tf_dunder=tf_dunder,
-                    scratch=scratch,
-                    strict_dunder=strict_dunder,
-                )
+                try:
+                    return await client.run_transformation(
+                        transformation_dict,
+                        tf_checksum=tf_checksum,
+                        tf_dunder=tf_dunder,
+                        scratch=scratch,
+                        strict_dunder=strict_dunder,
+                    )
+                except asyncio.CancelledError:
+                    with contextlib.suppress(Exception):
+                        await client.cancel_transformation(tf_checksum)
+                    raise
             except ClientRestartRequiredError:
                 client.restart()
                 if attempt == 1:
                     raise
     raise RuntimeError("Unreachable")
+
+
+async def cancel_transformation_async(tf_checksum: Checksum) -> bool:
+    if not _jobserver_clients:
+        raise RuntimeError("No jobserver clients are available")
+    tf_checksum = Checksum(tf_checksum)
+    canceled = False
+    for client in _jobserver_clients:
+        for attempt in range(2):
+            try:
+                canceled = (
+                    bool(await client.cancel_transformation(tf_checksum)) or canceled
+                )
+                break
+            except ClientRestartRequiredError:
+                client.restart()
+                if attempt == 1:
+                    raise
+    return canceled
+
+
+def cancel_transformation(tf_checksum: Checksum) -> bool:
+    import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None and loop.is_running():
+        raise RuntimeError("Cannot block on cancel_transformation() in a running loop")
+    return asyncio.run(cancel_transformation_async(tf_checksum))
+
+
+async def transformation_status_async(tf_checksum: Checksum) -> str:
+    if not _jobserver_clients:
+        raise RuntimeError("No jobserver clients are available")
+    tf_checksum = Checksum(tf_checksum)
+    for client in _jobserver_clients:
+        for attempt in range(2):
+            try:
+                status = await client.transformation_status(tf_checksum)
+                if status != "not-running":
+                    return status
+                break
+            except ClientRestartRequiredError:
+                client.restart()
+                if attempt == 1:
+                    raise
+    return "not-running"
+
+
+def transformation_status(tf_checksum: Checksum) -> str:
+    import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None and loop.is_running():
+        raise RuntimeError("Cannot block on transformation_status() in a running loop")
+    return asyncio.run(transformation_status_async(tf_checksum))
 
 
 def ensure_initialized():
