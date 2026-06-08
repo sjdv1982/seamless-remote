@@ -83,6 +83,35 @@ class JobserverClient(Client):
             return result0
         return Checksum(result0)
 
+    @_retry_operation
+    async def cancel_transformation(self, tf_checksum):
+        session_async = self._get_session()
+        tf_checksum = Checksum(tf_checksum)
+        path = self._require_url() + f"/cancel-transformation/{tf_checksum.hex()}"
+        async with session_async.post(path) as response:
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            payload = json.loads(await response.text())
+        return bool(payload.get("canceled", False))
+
+    @_retry_operation
+    async def transformation_status(self, tf_checksum):
+        session_async = self._get_session()
+        tf_checksum = Checksum(tf_checksum)
+        path = self._require_url() + f"/transformation-status/{tf_checksum.hex()}"
+        async with session_async.get(path) as response:
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            payload = json.loads(await response.text())
+        status = payload.get("status")
+        if not isinstance(status, str):
+            raise ClientConnectionError(
+                f"Malformed jobserver status payload: {payload!r}"
+            )
+        return status
+
 
 _launcher_cache = lrucache(1000)
 

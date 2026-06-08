@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from contextlib import AbstractAsyncContextManager
 import sys
@@ -95,6 +96,7 @@ class _FakeJobserverClient:
     def __init__(self, responses):
         self.responses = list(responses)
         self.calls = 0
+        self.cancel_calls = []
         self.restart_calls = 0
 
     async def run_transformation(self, transformation_dict, **kwargs):
@@ -104,6 +106,10 @@ class _FakeJobserverClient:
         if isinstance(result, BaseException):
             raise result
         return result
+
+    async def cancel_transformation(self, tf_checksum):
+        self.cancel_calls.append(str(tf_checksum))
+        return True
 
     def restart(self):
         self.restart_calls += 1
@@ -146,3 +152,16 @@ class JobserverRemoteRecoveryTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(client.calls, 1)
         self.assertEqual(client.restart_calls, 0)
+
+    async def test_run_transformation_cancels_jobserver_when_await_is_cancelled(self):
+        client = _FakeJobserverClient([asyncio.CancelledError()])
+        jobserver_remote._jobserver_clients[:] = [client]
+        with self.assertRaises(asyncio.CancelledError):
+            await jobserver_remote.run_transformation(
+                {"__language__": "python"},
+                tf_checksum="2" * 64,
+                tf_dunder={},
+                scratch=False,
+            )
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(client.cancel_calls, ["2" * 64])
