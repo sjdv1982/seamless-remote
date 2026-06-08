@@ -37,6 +37,7 @@ class JobserverClient(Client):
         tf_checksum,
         tf_dunder,
         scratch: bool,
+        strict_dunder: bool = False,
     ):
         session_async = self._get_session()
         tf_checksum = Checksum(tf_checksum)
@@ -45,6 +46,7 @@ class JobserverClient(Client):
             "tf_checksum": tf_checksum.hex(),
             "tf_dunder": tf_dunder,
             "scratch": bool(scratch),
+            "strict_dunder": bool(strict_dunder),
             "record": get_record_mode(),
         }
 

@@ -106,6 +106,7 @@ async def run_transformation(
     tf_checksum: Checksum,
     tf_dunder: Dict[str, Any],
     scratch: bool,
+    strict_dunder: bool = False,
 ):
     if not _jobserver_clients:
         raise RuntimeError("No jobserver clients are available")
@@ -118,6 +119,7 @@ async def run_transformation(
                     tf_checksum=tf_checksum,
                     tf_dunder=tf_dunder,
                     scratch=scratch,
+                    strict_dunder=strict_dunder,
                 )
             except ClientRestartRequiredError:
                 client.restart()
