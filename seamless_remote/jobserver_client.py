@@ -54,8 +54,12 @@ class JobserverClient(Client):
         async with session_async.get(path, json=request) as response:
             if int(response.status / 100) in (4, 5):
                 text = await response.text()
+                if response.status == 409 and "Transformation was canceled" in text:
+                    raise RuntimeError("Transformation was canceled")
                 raise ClientConnectionError(f"Error {response.status}: {text}")
             result0 = await response.text()
+        if result0 == "Transformation was canceled":
+            raise RuntimeError("Transformation was canceled")
         try:
             payload = json.loads(result0)
         except Exception:
