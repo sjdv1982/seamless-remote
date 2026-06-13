@@ -195,6 +195,19 @@ async def get_expression_result(
             return result
 
 
+async def get_hash_type(checksum: Checksum) -> int | None:
+    """Return cached HashType word from remote databases, if known."""
+
+    checksum = Checksum(checksum)
+
+    for client in _read_database_clients:
+        _debug(f"query {client} for hash_type {checksum.hex()}")
+        result = await client.get_hash_type(checksum)
+        _debug(f"client {client} returned {result}")
+        if result is not None:
+            return result
+
+
 async def get_rev_expressions(result_checksum: Checksum) -> list[dict] | None:
     """Return expressions that produce result_checksum, if known."""
 
@@ -274,6 +287,18 @@ async def set_expression_result(
         ok = await client.set_expression_result(
             input_checksum, path, celltype, target_celltype, result_checksum
         )
+        if ok is not False:
+            written = True
+    return written
+
+
+async def set_hash_type(checksum: Checksum, hash_type: int):
+    """Write a checksum HashType word to remote databases."""
+
+    checksum = Checksum(checksum)
+    written = False
+    for client in _write_database_clients:
+        ok = await client.set_hash_type(checksum, hash_type)
         if ok is not False:
             written = True
     return written

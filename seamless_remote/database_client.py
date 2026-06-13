@@ -203,6 +203,45 @@ class DatabaseClient(Client):
         return Checksum(result0)
 
     @_retry_operation
+    async def get_hash_type(self, checksum: Checksum) -> int | None:
+        """Return the cached HashType word for checksum, if known."""
+        semaphore = self._get_semaphore()
+        if semaphore is None:
+            return await self._get_hash_type_unthrottled(checksum)
+
+        await semaphore.acquire()
+        try:
+            return await self._get_hash_type_unthrottled(checksum)
+        finally:
+            semaphore.release()
+
+    async def _get_hash_type_unthrottled(self, checksum: Checksum) -> int | None:
+        session_async = self._get_session()
+        checksum = Checksum(checksum)
+        request = {"type": "hash_type", "checksum": checksum.hex()}
+        url = self._require_url()
+        async with session_async.get(url, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                if response.status == 404:
+                    return None
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        try:
+            payload = json.loads(result0)
+        except Exception as exc:
+            raise ClientConnectionError(
+                f"Malformed response for hash_type: {result0!r}"
+            ) from exc
+        if payload is None:
+            return None
+        if not _valid_hash_type_word(payload):
+            raise ClientConnectionError(
+                f"Malformed response for hash_type: {payload!r}"
+            )
+        return payload
+
+    @_retry_operation
     async def get_rev_expressions(
         self, result_checksum: Checksum
     ) -> list[dict] | None:
@@ -427,6 +466,31 @@ class DatabaseClient(Client):
                 raise ClientConnectionError(f"Error {response.status}: {text}")
 
     @_retry_operation
+    async def set_hash_type(self, checksum: Checksum, hash_type: int):
+        """Store a HashType word for checksum."""
+        if self.readonly:
+            raise AttributeError("Read-only database client")
+        if not _valid_hash_type_word(hash_type):
+            raise ValueError(f"Invalid HashType word: {hash_type!r}")
+        session_async = self._get_session()
+        checksum = Checksum(checksum)
+        request = {
+            "type": "hash_type",
+            "checksum": checksum.hex(),
+            "value": hash_type,
+        }
+        url = self._require_url()
+        async with session_async.put(url, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                if (
+                    response.status == 409
+                    and "HashType already exists with different value" in text
+                ):
+                    return False
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+
+    @_retry_operation
     async def set_execution_record(
         self, tf_checksum: Checksum, result_checksum: Checksum, record: dict
     ):
@@ -563,3 +627,13 @@ def _parse_max_inflight() -> int:
     except Exception:
         return default
     return max(0, value)
+
+
+def _valid_hash_type_word(value: int) -> bool:
+    if not isinstance(value, int):
+        return False
+    try:
+        from seamless.checksum.hash_type import HashType
+    except ImportError:
+        return False
+    return HashType.is_valid_word(value)

@@ -14,6 +14,9 @@ if str(DATABASE_DIR) not in sys.path:
 
 _seamless = ModuleType("seamless")
 _seamless.__path__ = []
+_seamless_checksum = ModuleType("seamless.checksum")
+_seamless_checksum.__path__ = []
+_seamless_hash_type = ModuleType("seamless.checksum.hash_type")
 _seamless_util = ModuleType("seamless.util")
 _seamless_util.__path__ = []
 _seamless_pylru = ModuleType("seamless.util.pylru")
@@ -38,10 +41,23 @@ class _Checksum:
 _seamless.Checksum = _Checksum
 _seamless.is_worker = lambda: False
 _seamless.ensure_open = lambda *args, **kwargs: None
+
+
+class _HashType:
+    @staticmethod
+    def is_valid_word(value):
+        return isinstance(value, int) and 0 <= value < 8192
+
+
+_seamless_hash_type.HashType = _HashType
 _seamless_pylru.lrucache = lambda size: {}
+_seamless.checksum = _seamless_checksum
+_seamless_checksum.hash_type = _seamless_hash_type
 _seamless_util.pylru = _seamless_pylru
 _seamless.util = _seamless_util
 sys.modules["seamless"] = _seamless
+sys.modules["seamless.checksum"] = _seamless_checksum
+sys.modules["seamless.checksum.hash_type"] = _seamless_hash_type
 sys.modules["seamless.util"] = _seamless_util
 sys.modules["seamless.util.pylru"] = _seamless_pylru
 
@@ -59,6 +75,9 @@ BUCKET_CHECKSUM = "3" * 64
 EXPR_INPUT_CHECKSUM = "5" * 64
 EXPR_RESULT_CHECKSUM = "6" * 64
 EXPR_OTHER_RESULT_CHECKSUM = "7" * 64
+HASH_TYPE_WORD = 4
+HASH_TYPE_OTHER_WORD = 5
+HASH_TYPE_INVALID_WORD = 8192
 
 
 def _record():
@@ -89,13 +108,26 @@ class _FakeSession:
     def __init__(self, server: DatabaseServer):
         self.server = server
 
-    def get(self, path, json=None):
-        del path
+    def get(self, path, json=None, **kwargs):
+        del kwargs
+        if str(path).endswith("/healthcheck"):
+            return _StaticRequest(_Response(200, "OK"))
         return _FakeRequest("GET", self.server, json or {})
 
-    def put(self, path, json=None):
-        del path
+    def put(self, path, json=None, **kwargs):
+        del path, kwargs
         return _FakeRequest("PUT", self.server, json or {})
+
+
+class _StaticRequest:
+    def __init__(self, response):
+        self.response = response
+
+    async def __aenter__(self):
+        return self.response
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
 
 
 class _FakeRequest:
@@ -289,3 +321,30 @@ class DatabaseClientExecutionRecordTests(unittest.IsolatedAsyncioTestCase):
             EXPR_INPUT_CHECKSUM, "[0]", "bytes", "int"
         )
         self.assertEqual(result.hex(), EXPR_RESULT_CHECKSUM)
+
+    async def test_hash_type_roundtrip(self):
+        result = await self.client.get_hash_type(EXPR_INPUT_CHECKSUM)
+        self.assertIsNone(result)
+
+        result = await self.client.set_hash_type(EXPR_INPUT_CHECKSUM, HASH_TYPE_WORD)
+        self.assertIsNone(result)
+
+        result = await self.client.get_hash_type(EXPR_INPUT_CHECKSUM)
+        self.assertEqual(result, HASH_TYPE_WORD)
+
+    async def test_hash_type_conflict_is_nonfatal(self):
+        result = await self.client.set_hash_type(EXPR_INPUT_CHECKSUM, HASH_TYPE_WORD)
+        self.assertIsNone(result)
+        result = await self.client.set_hash_type(
+            EXPR_INPUT_CHECKSUM, HASH_TYPE_OTHER_WORD
+        )
+        self.assertIs(result, False)
+
+        result = await self.client.get_hash_type(EXPR_INPUT_CHECKSUM)
+        self.assertEqual(result, HASH_TYPE_WORD)
+
+    async def test_hash_type_rejects_invalid_words_client_side(self):
+        with self.assertRaises(ValueError):
+            await self.client.set_hash_type(
+                EXPR_INPUT_CHECKSUM, HASH_TYPE_INVALID_WORD
+            )
