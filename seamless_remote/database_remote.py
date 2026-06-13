@@ -175,6 +175,39 @@ async def get_rev_transformations(
             return result
 
 
+async def get_expression_result(
+    input_checksum: Checksum,
+    path: str,
+    celltype: str,
+    target_celltype: str,
+) -> Checksum | None:
+    """Return a cached expression result from remote databases, if known."""
+
+    input_checksum = Checksum(input_checksum)
+
+    for client in _read_database_clients:
+        _debug(f"query {client} for expression {input_checksum.hex()} {path!r}")
+        result = await client.get_expression_result(
+            input_checksum, path, celltype, target_celltype
+        )
+        _debug(f"client {client} returned {result}")
+        if result is not None:
+            return result
+
+
+async def get_rev_expressions(result_checksum: Checksum) -> list[dict] | None:
+    """Return expressions that produce result_checksum, if known."""
+
+    result_checksum = Checksum(result_checksum)
+
+    for client in _read_database_clients:
+        _debug(f"query {client} for rev expression {result_checksum.hex()}")
+        result = await client.get_rev_expressions(result_checksum)
+        _debug(f"client {client} returned {result}")
+        if result is not None:
+            return result
+
+
 async def get_execution_record(tf_checksum: Checksum) -> dict | None:
     """Return the canonical execution record for a transformation, if known."""
     tf_checksum = Checksum(tf_checksum)
@@ -221,6 +254,27 @@ async def set_transformation_result(tf_checksum: Checksum, result_checksum: Chec
     for client in _write_database_clients:
         ok = await client.set_transformation_result(tf_checksum, result_checksum)
         if ok:
+            written = True
+    return written
+
+
+async def set_expression_result(
+    input_checksum: Checksum,
+    path: str,
+    celltype: str,
+    target_celltype: str,
+    result_checksum: Checksum,
+):
+    """Write an expression result to remote databases."""
+
+    input_checksum = Checksum(input_checksum)
+    result_checksum = Checksum(result_checksum)
+    written = False
+    for client in _write_database_clients:
+        ok = await client.set_expression_result(
+            input_checksum, path, celltype, target_celltype, result_checksum
+        )
+        if ok is not False:
             written = True
     return written
 

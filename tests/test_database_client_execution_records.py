@@ -56,6 +56,9 @@ from seamless_remote.database_client import DatabaseClient  # noqa: E402
 TF_CHECKSUM = "1" * 64
 RESULT_CHECKSUM = "2" * 64
 BUCKET_CHECKSUM = "3" * 64
+EXPR_INPUT_CHECKSUM = "5" * 64
+EXPR_RESULT_CHECKSUM = "6" * 64
+EXPR_OTHER_RESULT_CHECKSUM = "7" * 64
 
 
 def _record():
@@ -236,3 +239,53 @@ class DatabaseClientExecutionRecordTests(unittest.IsolatedAsyncioTestCase):
             ),
             updated_probe,
         )
+
+    async def test_expression_result_roundtrip_and_reverse_lookup(self):
+        result = await self.client.get_expression_result(
+            EXPR_INPUT_CHECKSUM, "a", "plain", "mixed"
+        )
+        self.assertIsNone(result)
+
+        await self.client.set_expression_result(
+            EXPR_INPUT_CHECKSUM,
+            "a",
+            "plain",
+            "mixed",
+            EXPR_RESULT_CHECKSUM,
+        )
+
+        result = await self.client.get_expression_result(
+            EXPR_INPUT_CHECKSUM, "a", "plain", "mixed"
+        )
+        self.assertEqual(result.hex(), EXPR_RESULT_CHECKSUM)
+
+        rev = await self.client.get_rev_expressions(EXPR_RESULT_CHECKSUM)
+        self.assertEqual(len(rev), 1)
+        self.assertEqual(rev[0]["checksum"].hex(), EXPR_INPUT_CHECKSUM)
+        self.assertEqual(rev[0]["path"], "a")
+        self.assertEqual(rev[0]["celltype"], "plain")
+        self.assertEqual(rev[0]["target_celltype"], "mixed")
+        self.assertEqual(rev[0]["result"].hex(), EXPR_RESULT_CHECKSUM)
+
+    async def test_expression_result_conflict_is_nonfatal(self):
+        result = await self.client.set_expression_result(
+            EXPR_INPUT_CHECKSUM,
+            "[0]",
+            "bytes",
+            "int",
+            EXPR_RESULT_CHECKSUM,
+        )
+        self.assertIsNone(result)
+        result = await self.client.set_expression_result(
+            EXPR_INPUT_CHECKSUM,
+            "[0]",
+            "bytes",
+            "int",
+            EXPR_OTHER_RESULT_CHECKSUM,
+        )
+        self.assertIs(result, False)
+
+        result = await self.client.get_expression_result(
+            EXPR_INPUT_CHECKSUM, "[0]", "bytes", "int"
+        )
+        self.assertEqual(result.hex(), EXPR_RESULT_CHECKSUM)
