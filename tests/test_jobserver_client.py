@@ -79,6 +79,31 @@ class _FakeSession:
 
 
 class JobserverClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_expression_parses_structured_success_payload(self):
+        client = JobserverClient()
+        client.url = "http://jobserver.invalid"
+        client._initialized = True
+        session = _FakeSession('{"result_checksum": "%s"}' % ("9" * 64))
+        client._get_session = lambda: session
+
+        result = await client.run_expression("1" * 64, "a", "plain", "str")
+
+        self.assertEqual(str(result), "9" * 64)
+        self.assertEqual(
+            session.requests,
+            [
+                (
+                    "http://jobserver.invalid/run-expression",
+                    {
+                        "input_checksum": "1" * 64,
+                        "path": "a",
+                        "celltype": "plain",
+                        "target_celltype": "str",
+                    },
+                )
+            ],
+        )
+
     async def test_run_transformation_parses_structured_success_payload(self):
         client = JobserverClient()
         client.url = "http://jobserver.invalid"

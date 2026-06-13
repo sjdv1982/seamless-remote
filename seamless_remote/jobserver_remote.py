@@ -135,6 +135,31 @@ async def run_transformation(
     raise RuntimeError("Unreachable")
 
 
+async def run_expression(
+    input_checksum: Checksum,
+    path: str,
+    celltype: str,
+    target_celltype: str,
+) -> Checksum:
+    if not _jobserver_clients:
+        raise RuntimeError("No jobserver clients are available")
+    input_checksum = Checksum(input_checksum)
+    for client in _jobserver_clients:
+        for attempt in range(2):
+            try:
+                return await client.run_expression(
+                    input_checksum,
+                    path,
+                    celltype,
+                    target_celltype,
+                )
+            except ClientRestartRequiredError:
+                client.restart()
+                if attempt == 1:
+                    raise
+    raise RuntimeError("Unreachable")
+
+
 async def cancel_transformation_async(tf_checksum: Checksum) -> bool:
     if not _jobserver_clients:
         raise RuntimeError("No jobserver clients are available")

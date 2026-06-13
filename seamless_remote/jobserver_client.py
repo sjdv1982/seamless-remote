@@ -88,6 +88,41 @@ class JobserverClient(Client):
         return Checksum(result0)
 
     @_retry_operation
+    async def run_expression(
+        self,
+        input_checksum,
+        path: str,
+        celltype: str,
+        target_celltype: str,
+    ) -> Checksum:
+        session_async = self._get_session()
+        input_checksum = Checksum(input_checksum)
+        request = {
+            "input_checksum": input_checksum.hex(),
+            "path": path,
+            "celltype": celltype,
+            "target_celltype": target_celltype,
+        }
+        path_url = self._require_url() + "/run-expression"
+        async with session_async.get(path_url, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        try:
+            payload = json.loads(result0)
+        except Exception as exc:
+            raise ClientConnectionError(
+                f"Malformed jobserver expression payload: {result0!r}"
+            ) from exc
+        result_checksum = payload.get("result_checksum")
+        if not isinstance(result_checksum, str):
+            raise ClientConnectionError(
+                f"Malformed jobserver expression payload: {payload!r}"
+            )
+        return Checksum(result_checksum)
+
+    @_retry_operation
     async def cancel_transformation(self, tf_checksum):
         session_async = self._get_session()
         tf_checksum = Checksum(tf_checksum)
