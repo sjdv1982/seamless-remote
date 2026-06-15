@@ -2,6 +2,7 @@
 
 import json
 import sys
+import uuid
 from aiohttp import ClientConnectionError
 from frozendict import frozendict
 
@@ -38,6 +39,7 @@ class JobserverClient(Client):
         tf_dunder,
         scratch: bool,
         strict_dunder: bool = False,
+        member_id: str | None = None,
     ):
         session_async = self._get_session()
         tf_checksum = Checksum(tf_checksum)
@@ -48,6 +50,7 @@ class JobserverClient(Client):
             "scratch": bool(scratch),
             "strict_dunder": bool(strict_dunder),
             "record": get_record_mode(),
+            "member_id": member_id or uuid.uuid4().hex,
         }
 
         path = self._require_url() + "/run-transformation"
@@ -128,6 +131,19 @@ class JobserverClient(Client):
         tf_checksum = Checksum(tf_checksum)
         path = self._require_url() + f"/cancel-transformation/{tf_checksum.hex()}"
         async with session_async.post(path) as response:
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            payload = json.loads(await response.text())
+        return bool(payload.get("canceled", False))
+
+    @_retry_operation
+    async def softcancel_transformation(self, tf_checksum, member_id: str):
+        session_async = self._get_session()
+        tf_checksum = Checksum(tf_checksum)
+        request = {"member_id": str(member_id)}
+        path = self._require_url() + f"/softcancel-transformation/{tf_checksum.hex()}"
+        async with session_async.post(path, json=request) as response:
             if int(response.status / 100) in (4, 5):
                 text = await response.text()
                 raise ClientConnectionError(f"Error {response.status}: {text}")

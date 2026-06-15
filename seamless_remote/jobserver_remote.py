@@ -109,6 +109,7 @@ async def run_transformation(
     tf_dunder: Dict[str, Any],
     scratch: bool,
     strict_dunder: bool = False,
+    member_id: str | None = None,
 ):
     if not _jobserver_clients:
         raise RuntimeError("No jobserver clients are available")
@@ -123,10 +124,14 @@ async def run_transformation(
                         tf_dunder=tf_dunder,
                         scratch=scratch,
                         strict_dunder=strict_dunder,
+                        member_id=member_id,
                     )
                 except asyncio.CancelledError:
-                    with contextlib.suppress(Exception):
-                        await client.cancel_transformation(tf_checksum)
+                    if member_id is not None:
+                        with contextlib.suppress(Exception):
+                            await client.softcancel_transformation(
+                                tf_checksum, member_id
+                            )
                     raise
             except ClientRestartRequiredError:
                 client.restart()
@@ -189,6 +194,40 @@ def cancel_transformation(tf_checksum: Checksum) -> bool:
     if loop is not None and loop.is_running():
         raise RuntimeError("Cannot block on cancel_transformation() in a running loop")
     return asyncio.run(cancel_transformation_async(tf_checksum))
+
+
+async def softcancel_transformation_async(
+    tf_checksum: Checksum, member_id: str
+) -> bool:
+    if not _jobserver_clients:
+        raise RuntimeError("No jobserver clients are available")
+    tf_checksum = Checksum(tf_checksum)
+    canceled = False
+    for client in _jobserver_clients:
+        for attempt in range(2):
+            try:
+                canceled = (
+                    bool(await client.softcancel_transformation(tf_checksum, member_id))
+                    or canceled
+                )
+                break
+            except ClientRestartRequiredError:
+                client.restart()
+                if attempt == 1:
+                    raise
+    return canceled
+
+
+def softcancel_transformation(tf_checksum: Checksum, member_id: str) -> bool:
+    import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None and loop.is_running():
+        raise RuntimeError("Cannot block on softcancel_transformation() in a running loop")
+    return asyncio.run(softcancel_transformation_async(tf_checksum, member_id))
 
 
 async def transformation_status_async(tf_checksum: Checksum) -> str:
