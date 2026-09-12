@@ -295,8 +295,8 @@ class DatabaseClientExecutionRecordTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rev), 1)
         self.assertEqual(rev[0]["checksum"].hex(), EXPR_INPUT_CHECKSUM)
         self.assertEqual(rev[0]["path"], "a")
-        self.assertEqual(rev[0]["celltype"], "plain")
-        self.assertEqual(rev[0]["target_celltype"], "mixed")
+        self.assertEqual(rev[0]["input_celltype"], "plain")
+        self.assertEqual(rev[0]["celltype"], "mixed")
         self.assertEqual(rev[0]["result"].hex(), EXPR_RESULT_CHECKSUM)
 
     async def test_expression_result_conflict_is_nonfatal(self):

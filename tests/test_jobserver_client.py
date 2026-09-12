@@ -97,8 +97,8 @@ class JobserverClientTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "input_checksum": "1" * 64,
                         "path": "a",
-                        "celltype": "plain",
-                        "target_celltype": "str",
+                        'input_celltype': "plain",
+                        'celltype': "str",
                     },
                 )
             ],

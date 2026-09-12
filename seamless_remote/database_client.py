@@ -158,20 +158,20 @@ class DatabaseClient(Client):
         self,
         input_checksum: Checksum,
         path: str,
+        input_celltype: str,
         celltype: str,
-        target_celltype: str,
     ) -> Checksum | None:
         """Return the cached result of an expression, if known."""
         semaphore = self._get_semaphore()
         if semaphore is None:
             return await self._get_expression_result_unthrottled(
-                input_checksum, path, celltype, target_celltype
+                input_checksum, path, input_celltype, celltype
             )
 
         await semaphore.acquire()
         try:
             return await self._get_expression_result_unthrottled(
-                input_checksum, path, celltype, target_celltype
+                input_checksum, path, input_celltype, celltype
             )
         finally:
             semaphore.release()
@@ -180,8 +180,8 @@ class DatabaseClient(Client):
         self,
         input_checksum: Checksum,
         path: str,
+        input_celltype: str,
         celltype: str,
-        target_celltype: str,
     ) -> Checksum | None:
         session_async = self._get_session()
         input_checksum = Checksum(input_checksum)
@@ -189,8 +189,8 @@ class DatabaseClient(Client):
             "type": "expression",
             "checksum": input_checksum.hex(),
             "path": path,
+            "input_celltype": input_celltype,
             "celltype": celltype,
-            "target_celltype": target_celltype,
         }
         url = self._require_url()
         async with session_async.get(url, json=request) as response:
@@ -436,8 +436,8 @@ class DatabaseClient(Client):
         self,
         input_checksum: Checksum,
         path: str,
+        input_celltype: str,
         celltype: str,
-        target_celltype: str,
         result_checksum: Checksum,
     ):
         """Store an expression result."""
@@ -450,8 +450,8 @@ class DatabaseClient(Client):
             "type": "expression",
             "checksum": input_checksum.hex(),
             "path": path,
+            "input_celltype": input_celltype,
             "celltype": celltype,
-            "target_celltype": target_celltype,
             "value": result_checksum.hex(),
         }
         url = self._require_url()

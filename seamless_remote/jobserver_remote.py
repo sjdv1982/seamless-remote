@@ -144,7 +144,7 @@ async def run_expression(
     input_checksum: Checksum,
     path: str,
     input_celltype: str,
-    target_celltype: str,
+    celltype: str,
 ) -> Checksum:
     if not _jobserver_clients:
         raise RuntimeError("No jobserver clients are available")
@@ -156,7 +156,7 @@ async def run_expression(
                     input_checksum,
                     path,
                     input_celltype,
-                    target_celltype,
+                    celltype,
                 )
             except ClientRestartRequiredError:
                 client.restart()
