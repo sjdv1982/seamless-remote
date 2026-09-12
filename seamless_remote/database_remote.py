@@ -178,7 +178,7 @@ async def get_rev_transformations(
 async def get_expression_result(
     input_checksum: Checksum,
     path: str,
-    celltype: str,
+    input_celltype: str,
     target_celltype: str,
 ) -> Checksum | None:
     """Return a cached expression result from remote databases, if known."""
@@ -188,7 +188,7 @@ async def get_expression_result(
     for client in _read_database_clients:
         _debug(f"query {client} for expression {input_checksum.hex()} {path!r}")
         result = await client.get_expression_result(
-            input_checksum, path, celltype, target_celltype
+            input_checksum, path, input_celltype, target_celltype
         )
         _debug(f"client {client} returned {result}")
         if result is not None:
@@ -274,7 +274,7 @@ async def set_transformation_result(tf_checksum: Checksum, result_checksum: Chec
 async def set_expression_result(
     input_checksum: Checksum,
     path: str,
-    celltype: str,
+    input_celltype: str,
     target_celltype: str,
     result_checksum: Checksum,
 ):
@@ -285,7 +285,7 @@ async def set_expression_result(
     written = False
     for client in _write_database_clients:
         ok = await client.set_expression_result(
-            input_checksum, path, celltype, target_celltype, result_checksum
+            input_checksum, path, input_celltype, target_celltype, result_checksum
         )
         if ok is not False:
             written = True

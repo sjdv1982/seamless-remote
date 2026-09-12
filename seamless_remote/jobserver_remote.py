@@ -143,7 +143,7 @@ async def run_transformation(
 async def run_expression(
     input_checksum: Checksum,
     path: str,
-    celltype: str,
+    input_celltype: str,
     target_celltype: str,
 ) -> Checksum:
     if not _jobserver_clients:
@@ -155,7 +155,7 @@ async def run_expression(
                 return await client.run_expression(
                     input_checksum,
                     path,
-                    celltype,
+                    input_celltype,
                     target_celltype,
                 )
             except ClientRestartRequiredError:
