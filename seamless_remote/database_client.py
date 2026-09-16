@@ -483,11 +483,8 @@ class DatabaseClient(Client):
         async with session_async.put(url, json=request) as response:
             if int(response.status / 100) in (4, 5):
                 text = await response.text()
-                if (
-                    response.status == 409
-                    and "HashType already exists with different value" in text
-                ):
-                    return False
+                if response.status == 409:
+                    raise ValueError(text)
                 raise ClientConnectionError(f"Error {response.status}: {text}")
 
     @_retry_operation

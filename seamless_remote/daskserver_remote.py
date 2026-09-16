@@ -171,3 +171,14 @@ def ensure_initialized():
 
 
 __all__ = ["activate", "deactivate", "DaskserverLaunchedHandle", "ensure_initialized"]
+
+
+def has_daskserver():
+    """Whether the configured scheduler can evaluate Expressions remotely."""
+    return _launched_handle is not None
+
+
+async def run_expression(input_checksum, path, input_celltype, celltype):
+    from seamless_transformer.worker import dispatch_expression
+
+    return await dispatch_expression(input_checksum, path, input_celltype, celltype)

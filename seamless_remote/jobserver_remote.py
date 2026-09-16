@@ -47,6 +47,11 @@ def define_extern_client(name, type_, *, url=None):
     _extern_clients[name] = client
 
 
+def has_jobserver() -> bool:
+    """Return whether a jobserver client is configured, without contacting it."""
+    return bool(_jobserver_clients)
+
+
 def activate(
     *,
     extra_launched_clients: list[dict] | None = None,

@@ -1,6 +1,7 @@
 import sys
 import tempfile
 import unittest
+from enum import IntEnum
 from pathlib import Path
 from types import ModuleType
 
@@ -49,7 +50,43 @@ class _HashType:
         return isinstance(value, int) and 0 <= value < 8192
 
 
+class _DecodedHashType:
+    def __init__(self, word):
+        self.word = word
+        self.kind = word & 0xF
+        self.length = (word >> 4) & 0x3
+
+    @property
+    def is_utf8(self):
+        return self.kind in {4, 5, 6, 7, 8, 10, 11}
+
+    @property
+    def is_json(self):
+        return self.kind in {5, 6, 7, 8, 11}
+
+    def __eq__(self, other):
+        return isinstance(other, _DecodedHashType) and self.word == other.word
+
+
+def _unpack_hash_type(word):
+    return _DecodedHashType(word)
+
+
+def _hash_type_implies(tighter, looser):
+    if tighter.length != looser.length:
+        return False
+    if looser.kind == 9:
+        return True
+    if looser.kind == 10:
+        return tighter.is_utf8
+    if looser.kind == 11:
+        return tighter.is_json
+    return tighter == looser
+
+
 _seamless_hash_type.HashType = _HashType
+_seamless_hash_type.unpack = _unpack_hash_type
+_seamless_hash_type._hash_type_implies = _hash_type_implies
 _seamless_pylru.lrucache = lambda size: {}
 _seamless.checksum = _seamless_checksum
 _seamless_checksum.hash_type = _seamless_hash_type
@@ -78,6 +115,21 @@ EXPR_OTHER_RESULT_CHECKSUM = "7" * 64
 HASH_TYPE_WORD = 4
 HASH_TYPE_OTHER_WORD = 5
 HASH_TYPE_INVALID_WORD = 8192
+
+
+class _Kind(IntEnum):
+    RAW_BYTES = 0
+    RAW_TEXT = 4
+    JSON_STRING = 7
+    JSON_UNTESTED = 11
+
+
+class _Length(IntEnum):
+    SHORT = 0
+
+
+def _pack(kind, length):
+    return (int(kind) << 0) | (int(length) << 4)
 
 
 def _record():
@@ -332,16 +384,27 @@ class DatabaseClientExecutionRecordTests(unittest.IsolatedAsyncioTestCase):
         result = await self.client.get_hash_type(EXPR_INPUT_CHECKSUM)
         self.assertEqual(result, HASH_TYPE_WORD)
 
-    async def test_hash_type_conflict_is_nonfatal(self):
-        result = await self.client.set_hash_type(EXPR_INPUT_CHECKSUM, HASH_TYPE_WORD)
+    async def test_hash_type_conflict_raises_value_error(self):
+        stored = _pack(_Kind.RAW_TEXT, _Length.SHORT)
+        contradictory = _pack(_Kind.RAW_BYTES, _Length.SHORT)
+        result = await self.client.set_hash_type(EXPR_INPUT_CHECKSUM, stored)
         self.assertIsNone(result)
-        result = await self.client.set_hash_type(
-            EXPR_INPUT_CHECKSUM, HASH_TYPE_OTHER_WORD
-        )
-        self.assertIs(result, False)
+        with self.assertRaises(ValueError):
+            await self.client.set_hash_type(EXPR_INPUT_CHECKSUM, contradictory)
 
         result = await self.client.get_hash_type(EXPR_INPUT_CHECKSUM)
-        self.assertEqual(result, HASH_TYPE_WORD)
+        self.assertEqual(result, stored)
+
+    async def test_looser_hash_type_write_reports_success(self):
+        tighter = _pack(_Kind.JSON_STRING, _Length.SHORT)
+        looser = _pack(_Kind.JSON_UNTESTED, _Length.SHORT)
+        result = await self.client.set_hash_type(EXPR_INPUT_CHECKSUM, tighter)
+        self.assertIsNone(result)
+
+        result = await self.client.set_hash_type(EXPR_INPUT_CHECKSUM, looser)
+        self.assertIsNone(result)
+        result = await self.client.get_hash_type(EXPR_INPUT_CHECKSUM)
+        self.assertEqual(result, tighter)
 
     async def test_hash_type_rejects_invalid_words_client_side(self):
         with self.assertRaises(ValueError):
