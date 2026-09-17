@@ -4,6 +4,8 @@ from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from types import ModuleType
 
+from aiohttp import ClientConnectionError
+
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -14,6 +16,7 @@ _seamless.__path__ = []
 _seamless_util = ModuleType("seamless.util")
 _seamless_util.__path__ = []
 _seamless_pylru = ModuleType("seamless.util.pylru")
+_seamless_error_envelope = ModuleType("seamless.error_envelope")
 
 
 class _Checksum:
@@ -32,15 +35,40 @@ class _Checksum:
         return f"Checksum({self._hex!r})"
 
 
+class _CacheMissError(Exception):
+    def __init__(self, checksum):
+        self.checksum = _Checksum(checksum)
+        super().__init__(self.checksum)
+
+
+class _WorkflowExecutionError(Exception):
+    def __init__(self, message, *, kind="execution"):
+        self.kind = kind
+        super().__init__(message)
+
+
+def _envelope_to_error(body):
+    error = body.get("error", body)
+    kind = error["kind"]
+    message = error.get("message", "")
+    if kind == "cache_miss":
+        return _CacheMissError(error["checksum"])
+    return _WorkflowExecutionError(message, kind=kind)
+
+
 _seamless.Checksum = _Checksum
+_seamless.CacheMissError = _CacheMissError
+_seamless.WorkflowExecutionError = _WorkflowExecutionError
 _seamless.is_worker = lambda: False
 _seamless.ensure_open = lambda *args, **kwargs: None
+_seamless_error_envelope.envelope_to_error = _envelope_to_error
 _seamless_pylru.lrucache = lambda size: {}
 _seamless_util.pylru = _seamless_pylru
 _seamless.util = _seamless_util
 sys.modules["seamless"] = _seamless
 sys.modules["seamless.util"] = _seamless_util
 sys.modules["seamless.util.pylru"] = _seamless_pylru
+sys.modules["seamless.error_envelope"] = _seamless_error_envelope
 
 _remote_job = ModuleType("seamless_transformer.remote_job")
 _remote_job.parse_remote_job_written = lambda value: None
@@ -69,16 +97,54 @@ class _Response(AbstractAsyncContextManager):
 
 
 class _FakeSession:
-    def __init__(self, text):
+    def __init__(self, text="", *, status=200, exception=None):
         self.text = text
+        self.status = status
+        self.exception = exception
         self.requests = []
 
     def get(self, path, json=None):
         self.requests.append((path, json))
-        return _Response(text=self.text)
+        if self.exception is not None:
+            raise self.exception
+        return _Response(status=self.status, text=self.text)
 
 
 class JobserverClientTests(unittest.IsolatedAsyncioTestCase):
+    async def _run_expression_without_retries(self, session):
+        client = JobserverClient()
+        client.url = "http://jobserver.invalid"
+        client._initialized = True
+        client._get_session = lambda: session
+        return await JobserverClient.run_expression.__wrapped__(
+            client, "1" * 64, "a", "plain", "str"
+        )
+
+    async def test_run_expression_parses_structured_success_payload(self):
+        client = JobserverClient()
+        client.url = "http://jobserver.invalid"
+        client._initialized = True
+        session = _FakeSession('{"result_checksum": "%s"}' % ("9" * 64))
+        client._get_session = lambda: session
+
+        result = await client.run_expression("1" * 64, "a", "plain", "str")
+
+        self.assertEqual(str(result), "9" * 64)
+        self.assertEqual(
+            session.requests,
+            [
+                (
+                    "http://jobserver.invalid/run-expression",
+                    {
+                        "input_checksum": "1" * 64,
+                        "path": "a",
+                        'input_celltype': "plain",
+                        'celltype': "str",
+                    },
+                )
+            ],
+        )
+
     async def test_run_transformation_parses_structured_success_payload(self):
         client = JobserverClient()
         client.url = "http://jobserver.invalid"
@@ -168,3 +234,40 @@ class JobserverClientTests(unittest.IsolatedAsyncioTestCase):
             result,
             {"remote_job_written": "REMOTE_JOB_WRITTEN:/tmp/jobdir", "record_runtime": None},
         )
+
+    async def test_cache_miss_response_raises_cache_miss_error(self):
+        checksum = "2" * 64
+        session = _FakeSession(
+            '{"error": {"kind": "cache_miss", "message": "missing", '
+            f'"checksum": "{checksum}"}}}}'
+        )
+
+        with self.assertRaises(_CacheMissError) as info:
+            await self._run_expression_without_retries(session)
+
+        self.assertEqual(info.exception.checksum.hex(), checksum)
+        self.assertEqual(str(info.exception), checksum)
+
+    async def test_transport_and_malformed_bodies_stay_connection_errors(self):
+        sessions = [
+            _FakeSession(exception=ClientConnectionError("network down")),
+            _FakeSession("server crash", status=500),
+            _FakeSession("not json"),
+            _FakeSession('{"error": {"message": "kind missing"}}'),
+        ]
+
+        for session in sessions:
+            with self.subTest(session=session):
+                with self.assertRaises(ClientConnectionError):
+                    await self._run_expression_without_retries(session)
+
+    async def test_unknown_kind_is_an_execution_error(self):
+        session = _FakeSession(
+            '{"error": {"kind": "new_failure", "message": "new server failure"}}'
+        )
+
+        with self.assertRaises(_WorkflowExecutionError) as info:
+            await self._run_expression_without_retries(session)
+
+        self.assertEqual(str(info.exception), "new server failure")
+        self.assertEqual(info.exception.kind, "new_failure")

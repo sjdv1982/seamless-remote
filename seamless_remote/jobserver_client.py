@@ -1,11 +1,14 @@
 """Async client for Seamless jobservers."""
 
 import json
+import re
 import sys
+import uuid
 from aiohttp import ClientConnectionError
 from frozendict import frozendict
 
 from seamless import Checksum
+from seamless.error_envelope import envelope_to_error
 from seamless.util.pylru import lrucache
 from seamless_transformer.record_runtime import get_record_mode
 from seamless_transformer.remote_job import parse_remote_job_written
@@ -38,6 +41,7 @@ class JobserverClient(Client):
         tf_dunder,
         scratch: bool,
         strict_dunder: bool = False,
+        member_id: str | None = None,
     ):
         session_async = self._get_session()
         tf_checksum = Checksum(tf_checksum)
@@ -48,14 +52,13 @@ class JobserverClient(Client):
             "scratch": bool(scratch),
             "strict_dunder": bool(strict_dunder),
             "record": get_record_mode(),
+            "member_id": member_id or uuid.uuid4().hex,
         }
 
         path = self._require_url() + "/run-transformation"
         async with session_async.get(path, json=request) as response:
-            if int(response.status / 100) in (4, 5):
+            if response.status != 200:
                 text = await response.text()
-                if response.status == 409 and "Transformation was canceled" in text:
-                    raise RuntimeError("Transformation was canceled")
                 raise ClientConnectionError(f"Error {response.status}: {text}")
             result0 = await response.text()
         if result0 == "Transformation was canceled":
@@ -65,6 +68,7 @@ class JobserverClient(Client):
         except Exception:
             payload = None
         if isinstance(payload, dict):
+            _raise_job_error(payload)
             remote_job_written = payload.get("remote_job_written")
             if isinstance(remote_job_written, str):
                 return {
@@ -77,7 +81,7 @@ class JobserverClient(Client):
                     f"Malformed jobserver success payload: {payload!r}"
                 )
             return {
-                "result_checksum": Checksum(result_checksum),
+                "result_checksum": _result_checksum(result_checksum),
                 "probe_context": payload.get("probe_context"),
                 "compilation_context": payload.get("compilation_context"),
                 "job_validation": payload.get("job_validation"),
@@ -85,7 +89,43 @@ class JobserverClient(Client):
             }
         if parse_remote_job_written(result0) is not None:
             return result0
-        return Checksum(result0)
+        return _result_checksum(result0)
+
+    @_retry_operation
+    async def run_expression(
+        self,
+        input_checksum,
+        path: str,
+        input_celltype: str,
+        celltype: str,
+    ) -> Checksum:
+        session_async = self._get_session()
+        input_checksum = Checksum(input_checksum)
+        request = {
+            "input_checksum": input_checksum.hex(),
+            "path": path,
+            "input_celltype": input_celltype,
+            "celltype": celltype,
+        }
+        path_url = self._require_url() + "/run-expression"
+        async with session_async.get(path_url, json=request) as response:
+            if response.status != 200:
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        try:
+            payload = json.loads(result0)
+        except Exception as exc:
+            raise ClientConnectionError(
+                f"Malformed jobserver expression payload: {result0!r}"
+            ) from exc
+        _raise_job_error(payload)
+        result_checksum = payload.get("result_checksum")
+        if not isinstance(result_checksum, str):
+            raise ClientConnectionError(
+                f"Malformed jobserver expression payload: {payload!r}"
+            )
+        return _result_checksum(result_checksum)
 
     @_retry_operation
     async def cancel_transformation(self, tf_checksum):
@@ -93,7 +133,20 @@ class JobserverClient(Client):
         tf_checksum = Checksum(tf_checksum)
         path = self._require_url() + f"/cancel-transformation/{tf_checksum.hex()}"
         async with session_async.post(path) as response:
-            if int(response.status / 100) in (4, 5):
+            if response.status != 200:
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            payload = json.loads(await response.text())
+        return bool(payload.get("canceled", False))
+
+    @_retry_operation
+    async def softcancel_transformation(self, tf_checksum, member_id: str):
+        session_async = self._get_session()
+        tf_checksum = Checksum(tf_checksum)
+        request = {"member_id": str(member_id)}
+        path = self._require_url() + f"/softcancel-transformation/{tf_checksum.hex()}"
+        async with session_async.post(path, json=request) as response:
+            if response.status != 200:
                 text = await response.text()
                 raise ClientConnectionError(f"Error {response.status}: {text}")
             payload = json.loads(await response.text())
@@ -105,7 +158,7 @@ class JobserverClient(Client):
         tf_checksum = Checksum(tf_checksum)
         path = self._require_url() + f"/transformation-status/{tf_checksum.hex()}"
         async with session_async.get(path) as response:
-            if int(response.status / 100) in (4, 5):
+            if response.status != 200:
                 text = await response.text()
                 raise ClientConnectionError(f"Error {response.status}: {text}")
             payload = json.loads(await response.text())
@@ -185,3 +238,23 @@ class JobserverLaunchedClient(JobserverClient):
             return
         self._do_init()
         self._initialized = True
+
+
+def _raise_job_error(payload):
+    if not isinstance(payload, dict):
+        raise ClientConnectionError("Malformed jobserver payload")
+    if "error" in payload:
+        try:
+            exc = envelope_to_error(payload)
+        except (ValueError, KeyError, TypeError) as error:
+            raise ClientConnectionError(str(error)) from error
+        raise exc
+
+
+def _result_checksum(value):
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
+        raise ClientConnectionError("Malformed jobserver result checksum")
+    try:
+        return Checksum(value)
+    except (TypeError, ValueError) as exc:
+        raise ClientConnectionError("Malformed jobserver result checksum") from exc

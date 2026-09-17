@@ -154,6 +154,147 @@ class DatabaseClient(Client):
         return [Checksum(item) for item in payload]
 
     @_retry_operation
+    async def get_expression_result(
+        self,
+        input_checksum: Checksum,
+        path: str,
+        input_celltype: str,
+        celltype: str,
+    ) -> Checksum | None:
+        """Return the cached result of an expression, if known."""
+        semaphore = self._get_semaphore()
+        if semaphore is None:
+            return await self._get_expression_result_unthrottled(
+                input_checksum, path, input_celltype, celltype
+            )
+
+        await semaphore.acquire()
+        try:
+            return await self._get_expression_result_unthrottled(
+                input_checksum, path, input_celltype, celltype
+            )
+        finally:
+            semaphore.release()
+
+    async def _get_expression_result_unthrottled(
+        self,
+        input_checksum: Checksum,
+        path: str,
+        input_celltype: str,
+        celltype: str,
+    ) -> Checksum | None:
+        session_async = self._get_session()
+        input_checksum = Checksum(input_checksum)
+        request = {
+            "type": "expression",
+            "checksum": input_checksum.hex(),
+            "path": path,
+            "input_celltype": input_celltype,
+            "celltype": celltype,
+        }
+        url = self._require_url()
+        async with session_async.get(url, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                if response.status == 404:
+                    return None
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        return Checksum(result0)
+
+    @_retry_operation
+    async def get_hash_type(self, checksum: Checksum) -> int | None:
+        """Return the cached HashType word for checksum, if known."""
+        semaphore = self._get_semaphore()
+        if semaphore is None:
+            return await self._get_hash_type_unthrottled(checksum)
+
+        await semaphore.acquire()
+        try:
+            return await self._get_hash_type_unthrottled(checksum)
+        finally:
+            semaphore.release()
+
+    async def _get_hash_type_unthrottled(self, checksum: Checksum) -> int | None:
+        session_async = self._get_session()
+        checksum = Checksum(checksum)
+        request = {"type": "hash_type", "checksum": checksum.hex()}
+        url = self._require_url()
+        async with session_async.get(url, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                if response.status == 404:
+                    return None
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        try:
+            payload = json.loads(result0)
+        except Exception as exc:
+            raise ClientConnectionError(
+                f"Malformed response for hash_type: {result0!r}"
+            ) from exc
+        if payload is None:
+            return None
+        if not _valid_hash_type_word(payload):
+            raise ClientConnectionError(
+                f"Malformed response for hash_type: {payload!r}"
+            )
+        return payload
+
+    @_retry_operation
+    async def get_rev_expressions(
+        self, result_checksum: Checksum
+    ) -> list[dict] | None:
+        """Return expressions that produce result_checksum, if known."""
+        semaphore = self._get_semaphore()
+        if semaphore is None:
+            return await self._get_rev_expressions_unthrottled(result_checksum)
+
+        await semaphore.acquire()
+        try:
+            return await self._get_rev_expressions_unthrottled(result_checksum)
+        finally:
+            semaphore.release()
+
+    async def _get_rev_expressions_unthrottled(
+        self, result_checksum: Checksum
+    ) -> list[dict] | None:
+        session_async = self._get_session()
+        result_checksum = Checksum(result_checksum)
+        request = {"type": "rev_expression", "checksum": result_checksum.hex()}
+        url = self._require_url()
+        async with session_async.get(url, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                if response.status == 404:
+                    return None
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        try:
+            payload = json.loads(result0)
+        except Exception as exc:
+            raise ClientConnectionError(
+                f"Malformed response for rev_expression: {result0!r}"
+            ) from exc
+        if payload is None:
+            return None
+        if not isinstance(payload, list):
+            raise ClientConnectionError(
+                f"Malformed response for rev_expression: {payload!r}"
+            )
+        result = []
+        for item in payload:
+            if not isinstance(item, dict):
+                raise ClientConnectionError(
+                    f"Malformed response for rev_expression: {payload!r}"
+                )
+            expr = dict(item)
+            expr["checksum"] = Checksum(expr["checksum"])
+            expr["result"] = Checksum(expr["result"])
+            result.append(expr)
+        return result
+
+    @_retry_operation
     async def get_execution_record(self, tf_checksum: Checksum) -> dict | None:
         """Return the canonical execution record for a transformation, if known."""
         semaphore = self._get_semaphore()
@@ -288,6 +429,62 @@ class DatabaseClient(Client):
         async with session_async.put(path, json=request) as response:
             if int(response.status / 100) in (4, 5):
                 text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+
+    @_retry_operation
+    async def set_expression_result(
+        self,
+        input_checksum: Checksum,
+        path: str,
+        input_celltype: str,
+        celltype: str,
+        result_checksum: Checksum,
+    ):
+        """Store an expression result."""
+        if self.readonly:
+            raise AttributeError("Read-only database client")
+        session_async = self._get_session()
+        input_checksum = Checksum(input_checksum)
+        result_checksum = Checksum(result_checksum)
+        request = {
+            "type": "expression",
+            "checksum": input_checksum.hex(),
+            "path": path,
+            "input_celltype": input_celltype,
+            "celltype": celltype,
+            "value": result_checksum.hex(),
+        }
+        url = self._require_url()
+        async with session_async.put(url, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                if (
+                    response.status == 409
+                    and "Expression already exists with different result" in text
+                ):
+                    return False
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+
+    @_retry_operation
+    async def set_hash_type(self, checksum: Checksum, hash_type: int):
+        """Store a HashType word for checksum."""
+        if self.readonly:
+            raise AttributeError("Read-only database client")
+        if not _valid_hash_type_word(hash_type):
+            raise ValueError(f"Invalid HashType word: {hash_type!r}")
+        session_async = self._get_session()
+        checksum = Checksum(checksum)
+        request = {
+            "type": "hash_type",
+            "checksum": checksum.hex(),
+            "value": hash_type,
+        }
+        url = self._require_url()
+        async with session_async.put(url, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                if response.status == 409:
+                    raise ValueError(text)
                 raise ClientConnectionError(f"Error {response.status}: {text}")
 
     @_retry_operation
@@ -427,3 +624,13 @@ def _parse_max_inflight() -> int:
     except Exception:
         return default
     return max(0, value)
+
+
+def _valid_hash_type_word(value: int) -> bool:
+    if not isinstance(value, int):
+        return False
+    try:
+        from seamless.checksum.hash_type import HashType
+    except ImportError:
+        return False
+    return HashType.is_valid_word(value)

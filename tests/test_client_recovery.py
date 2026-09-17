@@ -5,6 +5,7 @@ import sys
 from types import ModuleType
 
 from aiohttp import ClientConnectionError
+from seamless import CacheMissError, Checksum
 
 _seamless_transformer = ModuleType("seamless_transformer")
 _seamless_transformer.__path__ = []
@@ -97,10 +98,21 @@ class _FakeJobserverClient:
         self.responses = list(responses)
         self.calls = 0
         self.cancel_calls = []
+        self.softcancel_calls = []
+        self.run_kwargs = []
         self.restart_calls = 0
 
     async def run_transformation(self, transformation_dict, **kwargs):
-        del transformation_dict, kwargs
+        del transformation_dict
+        self.run_kwargs.append(kwargs)
+        self.calls += 1
+        result = self.responses.pop(0)
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    async def run_expression(self, *args, **kwargs):
+        del args, kwargs
         self.calls += 1
         result = self.responses.pop(0)
         if isinstance(result, BaseException):
@@ -109,6 +121,10 @@ class _FakeJobserverClient:
 
     async def cancel_transformation(self, tf_checksum):
         self.cancel_calls.append(str(tf_checksum))
+        return True
+
+    async def softcancel_transformation(self, tf_checksum, member_id):
+        self.softcancel_calls.append((str(tf_checksum), member_id))
         return True
 
     def restart(self):
@@ -121,6 +137,28 @@ class JobserverRemoteRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         jobserver_remote._jobserver_clients[:] = self._saved_clients
+
+    def test_has_jobserver(self):
+        jobserver_remote._jobserver_clients[:] = []
+        self.assertFalse(jobserver_remote.has_jobserver())
+        jobserver_remote._jobserver_clients[:] = [object()]
+        self.assertTrue(jobserver_remote.has_jobserver())
+
+    async def test_run_expression_does_not_retry_cache_miss(self):
+        checksum = Checksum("f" * 64)
+        client = _FakeJobserverClient([CacheMissError(checksum)])
+        jobserver_remote._jobserver_clients[:] = [client]
+
+        with self.assertRaises(CacheMissError) as info:
+            await jobserver_remote.run_expression(
+                checksum,
+                "a",
+                "plain",
+                "str",
+            )
+
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(info.exception.checksum, checksum)
 
     async def test_run_transformation_retries_restartable_client_once(self):
         client = _FakeJobserverClient(
@@ -153,7 +191,7 @@ class JobserverRemoteRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls, 1)
         self.assertEqual(client.restart_calls, 0)
 
-    async def test_run_transformation_cancels_jobserver_when_await_is_cancelled(self):
+    async def test_run_transformation_softcancels_member_when_await_is_cancelled(self):
         client = _FakeJobserverClient([asyncio.CancelledError()])
         jobserver_remote._jobserver_clients[:] = [client]
         with self.assertRaises(asyncio.CancelledError):
@@ -162,6 +200,24 @@ class JobserverRemoteRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 tf_checksum="2" * 64,
                 tf_dunder={},
                 scratch=False,
+                member_id="member-1",
             )
         self.assertEqual(client.calls, 1)
-        self.assertEqual(client.cancel_calls, ["2" * 64])
+        self.assertEqual(client.cancel_calls, [])
+        self.assertEqual(client.softcancel_calls, [("2" * 64, "member-1")])
+
+    async def test_run_transformation_without_member_does_not_hard_cancel_on_cancelled_await(
+        self,
+    ):
+        client = _FakeJobserverClient([asyncio.CancelledError()])
+        jobserver_remote._jobserver_clients[:] = [client]
+        with self.assertRaises(asyncio.CancelledError):
+            await jobserver_remote.run_transformation(
+                {"__language__": "python"},
+                tf_checksum="3" * 64,
+                tf_dunder={},
+                scratch=False,
+            )
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(client.cancel_calls, [])
+        self.assertEqual(client.softcancel_calls, [])

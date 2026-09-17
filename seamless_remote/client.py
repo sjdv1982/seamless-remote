@@ -315,7 +315,6 @@ class Client:
 
 def close_all_clients():
     """Close all tracked API clients and stop keepalive worker."""
-    ensure_open("close remote clients")
     _stop_keepalive_worker()
     for client in list(_clients):
         client._close_sessions()

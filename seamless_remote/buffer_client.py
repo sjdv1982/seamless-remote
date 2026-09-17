@@ -159,7 +159,7 @@ class BufferClient(Client):
         assert checksum
         curr_buf_checksum = None
         while 1:
-            path = self._require_url() + "/" + str(checksum)
+            path = self._require_url() + "/" + checksum.hex()
             async with session_async.get(path) as response:
                 if int(response.status) == 404:
                     return None
@@ -195,7 +195,7 @@ class BufferClient(Client):
     async def _promise_unthrottled(self, checksum: Checksum) -> None:
         session_async = self._get_session()
         checksum = Checksum(checksum)
-        path = self._require_url() + "/promise/" + str(checksum)
+        path = self._require_url() + "/promise/" + checksum.hex()
         async with session_async.put(path, timeout=self._request_timeout()) as response:
             if int(response.status / 100) in (4, 5):
                 text = await response.text()
@@ -213,7 +213,7 @@ class BufferClient(Client):
         checksum = Checksum(checksum)
         buffer_bytes = Buffer(buffer).content
         assert checksum
-        path = self._require_url() + "/" + str(checksum)
+        path = self._require_url() + "/" + checksum.hex()
         async with session_async.put(
             path, data=buffer_bytes, timeout=self._request_timeout()
         ) as response:
