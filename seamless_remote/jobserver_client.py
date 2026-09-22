@@ -98,6 +98,8 @@ class JobserverClient(Client):
         path: str,
         input_celltype: str,
         celltype: str,
+        *,
+        scratch: bool = True,
     ) -> Checksum:
         session_async = self._get_session()
         input_checksum = Checksum(input_checksum)
@@ -106,6 +108,7 @@ class JobserverClient(Client):
             "path": path,
             "input_celltype": input_celltype,
             "celltype": celltype,
+            "scratch": scratch,
         }
         path_url = self._require_url() + "/run-expression"
         async with session_async.get(path_url, json=request) as response:
