@@ -4,6 +4,7 @@ from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 from aiohttp import ClientConnectionError
 
 
@@ -144,6 +145,24 @@ class JobserverClientTests(unittest.IsolatedAsyncioTestCase):
                 )
             ],
         )
+
+    @pytest.mark.xfail(
+        strict=False,
+        reason="contract ahead of code: Expression dispatch does not carry scratch",
+    )
+    async def test_run_expression_carries_the_requesters_scratch_decision(self):
+        client = JobserverClient()
+        client.url = "http://jobserver.invalid"
+        client._initialized = True
+        session = _FakeSession('{"result_checksum": "%s"}' % ("9" * 64))
+        client._get_session = lambda: session
+
+        result = await client.run_expression(
+            "1" * 64, "a", "plain", "str", scratch=True
+        )
+
+        self.assertEqual(str(result), "9" * 64)
+        self.assertTrue(session.requests[0][1]["scratch"])
 
     async def test_run_transformation_parses_structured_success_payload(self):
         client = JobserverClient()
