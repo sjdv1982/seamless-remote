@@ -178,7 +178,11 @@ def has_daskserver():
     return _launched_handle is not None
 
 
-async def run_expression(input_checksum, path, input_celltype, celltype):
+async def run_expression(
+    input_checksum, path, input_celltype, celltype, *, scratch=True
+):
     from seamless_transformer.worker import dispatch_expression
 
-    return await dispatch_expression(input_checksum, path, input_celltype, celltype)
+    return await dispatch_expression(
+        input_checksum, path, input_celltype, celltype, scratch=scratch
+    )

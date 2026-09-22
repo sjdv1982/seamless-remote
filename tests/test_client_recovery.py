@@ -147,10 +147,6 @@ class JobserverRemoteRecoveryTests(unittest.IsolatedAsyncioTestCase):
         jobserver_remote._jobserver_clients[:] = [object()]
         self.assertTrue(jobserver_remote.has_jobserver())
 
-    @pytest.mark.xfail(
-        strict=False,
-        reason="contract ahead of code: remote Expression wrapper drops scratch",
-    )
     async def test_run_expression_forwards_scratch_to_the_client(self):
         checksum = Checksum("c" * 64)
         result = Checksum("d" * 64)
@@ -243,10 +239,6 @@ class JobserverRemoteRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.softcancel_calls, [])
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="contract ahead of code: daskserver Expression wrapper drops scratch",
-)
 def test_daskserver_expression_wrapper_forwards_scratch(monkeypatch):
     calls = []
     worker_module = ModuleType("seamless_transformer.worker")

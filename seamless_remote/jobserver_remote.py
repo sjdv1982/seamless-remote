@@ -150,6 +150,8 @@ async def run_expression(
     path: str,
     input_celltype: str,
     celltype: str,
+    *,
+    scratch: bool = True,
 ) -> Checksum:
     if not _jobserver_clients:
         raise RuntimeError("No jobserver clients are available")
@@ -162,6 +164,7 @@ async def run_expression(
                     path,
                     input_celltype,
                     celltype,
+                    scratch=scratch,
                 )
             except ClientRestartRequiredError:
                 client.restart()

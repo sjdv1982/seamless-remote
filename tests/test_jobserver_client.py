@@ -146,10 +146,6 @@ class JobserverClientTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    @pytest.mark.xfail(
-        strict=False,
-        reason="contract ahead of code: Expression dispatch does not carry scratch",
-    )
     async def test_run_expression_carries_the_requesters_scratch_decision(self):
         client = JobserverClient()
         client.url = "http://jobserver.invalid"
