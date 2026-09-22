@@ -4,6 +4,7 @@ from contextlib import AbstractAsyncContextManager
 import sys
 from types import ModuleType
 
+import pytest
 from aiohttp import ClientConnectionError
 from seamless import CacheMissError, Checksum
 
@@ -15,7 +16,7 @@ _seamless_transformer.remote_job = _remote_job
 sys.modules.setdefault("seamless_transformer", _seamless_transformer)
 sys.modules.setdefault("seamless_transformer.remote_job", _remote_job)
 
-from seamless_remote import jobserver_remote
+from seamless_remote import daskserver_remote, jobserver_remote
 from seamless_remote.client import (
     Client,
     ClientRestartRequiredError,
@@ -100,6 +101,7 @@ class _FakeJobserverClient:
         self.cancel_calls = []
         self.softcancel_calls = []
         self.run_kwargs = []
+        self.expression_kwargs = []
         self.restart_calls = 0
 
     async def run_transformation(self, transformation_dict, **kwargs):
@@ -112,7 +114,8 @@ class _FakeJobserverClient:
         return result
 
     async def run_expression(self, *args, **kwargs):
-        del args, kwargs
+        del args
+        self.expression_kwargs.append(kwargs)
         self.calls += 1
         result = self.responses.pop(0)
         if isinstance(result, BaseException):
@@ -143,6 +146,23 @@ class JobserverRemoteRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(jobserver_remote.has_jobserver())
         jobserver_remote._jobserver_clients[:] = [object()]
         self.assertTrue(jobserver_remote.has_jobserver())
+
+    @pytest.mark.xfail(
+        strict=False,
+        reason="contract ahead of code: remote Expression wrapper drops scratch",
+    )
+    async def test_run_expression_forwards_scratch_to_the_client(self):
+        checksum = Checksum("c" * 64)
+        result = Checksum("d" * 64)
+        client = _FakeJobserverClient([result])
+        jobserver_remote._jobserver_clients[:] = [client]
+
+        actual = await jobserver_remote.run_expression(
+            checksum, "a", "plain", "str", scratch=True
+        )
+
+        self.assertEqual(actual, result)
+        self.assertEqual(client.expression_kwargs, [{"scratch": True}])
 
     async def test_run_expression_does_not_retry_cache_miss(self):
         checksum = Checksum("f" * 64)
@@ -221,3 +241,28 @@ class JobserverRemoteRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls, 1)
         self.assertEqual(client.cancel_calls, [])
         self.assertEqual(client.softcancel_calls, [])
+
+
+@pytest.mark.xfail(
+    strict=False,
+    reason="contract ahead of code: daskserver Expression wrapper drops scratch",
+)
+def test_daskserver_expression_wrapper_forwards_scratch(monkeypatch):
+    calls = []
+    worker_module = ModuleType("seamless_transformer.worker")
+
+    async def dispatch_expression(*args, **kwargs):
+        calls.append(kwargs)
+        return Checksum("b" * 64)
+
+    worker_module.dispatch_expression = dispatch_expression
+    monkeypatch.setitem(sys.modules, "seamless_transformer.worker", worker_module)
+
+    result = asyncio.run(
+        daskserver_remote.run_expression(
+            Checksum("a" * 64), "value", "plain", "str", scratch=True
+        )
+    )
+
+    assert result == Checksum("b" * 64)
+    assert calls == [{"scratch": True}]
