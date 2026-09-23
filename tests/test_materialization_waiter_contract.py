@@ -110,10 +110,6 @@ def test_only_waiter_softcancel_aborts_materialization_after_linger():
     ''')
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="contract ahead of code: materializations are not deduplicated by checksum",
-)
 def test_two_distinct_expressions_share_checksum_fetch_after_one_softcancel():
     _run('''
         async def main():
