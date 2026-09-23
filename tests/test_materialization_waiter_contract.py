@@ -86,10 +86,6 @@ def _run(body):
     return result
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="contract ahead of code: checksum waiting set and linger are not implemented",
-)
 def test_only_waiter_softcancel_aborts_materialization_after_linger():
     _run('''
         async def main():
