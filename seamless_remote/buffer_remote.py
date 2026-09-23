@@ -5,6 +5,7 @@ and to write to them
 - Buffer write servers
 """
 
+import asyncio
 import traceback
 from seamless import Buffer, Checksum
 from .buffer_client import BufferClient, BufferLaunchedClient
@@ -77,6 +78,9 @@ def inspect_extern_clients():
 _read_server_clients: list[BufferClient] = []
 _read_folders_clients: list[BufferClient] = []
 _write_server_clients: list[BufferClient] = []
+_pending_buffer_fetches: dict[
+    tuple[asyncio.AbstractEventLoop, Checksum], tuple[asyncio.Task, int]
+] = {}
 
 
 def has_write_server() -> bool:
@@ -176,6 +180,43 @@ async def get_buffer(checksum: Checksum) -> Buffer | None:
 
     checksum = Checksum(checksum)
 
+    loop = asyncio.get_running_loop()
+    key = (loop, checksum)
+    pending = _pending_buffer_fetches.get(key)
+    if pending is None:
+        task = loop.create_task(_get_buffer(checksum))
+
+        def finished(fetch):
+            current = _pending_buffer_fetches.get(key)
+            if current is not None and current[0] is fetch:
+                _pending_buffer_fetches.pop(key, None)
+            if not fetch.cancelled():
+                # Mark failures as observed even if every waiter was canceled.
+                fetch.exception()
+
+        task.add_done_callback(finished)
+        waiters = 0
+    else:
+        task, waiters = pending
+
+    _pending_buffer_fetches[key] = (task, waiters + 1)
+
+    # A canceled expression waiter must not cancel a fetch another expression
+    # with the same input checksum is waiting for.
+    try:
+        return await asyncio.shield(task)
+    finally:
+        current = _pending_buffer_fetches.get(key)
+        if current is not None and current[0] is task:
+            remaining = current[1] - 1
+            if remaining == 0 and not task.done():
+                _pending_buffer_fetches.pop(key, None)
+                task.cancel()
+            else:
+                _pending_buffer_fetches[key] = (task, remaining)
+
+
+async def _get_buffer(checksum: Checksum) -> Buffer | None:
     for client in _read_folders_clients:
         buf = await client.get_file_buffer(checksum)
         if buf is not None:
