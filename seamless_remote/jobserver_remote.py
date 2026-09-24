@@ -151,7 +151,7 @@ async def run_expression(
     input_celltype: str,
     celltype: str,
     *,
-    scratch: bool = True,
+    scratch: bool = False,
 ) -> Checksum:
     if not _jobserver_clients:
         raise RuntimeError("No jobserver clients are available")
