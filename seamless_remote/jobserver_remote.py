@@ -156,7 +156,7 @@ async def run_expression(
     if not _jobserver_clients:
         raise RuntimeError("No jobserver clients are available")
     input_checksum = Checksum(input_checksum)
-    for client in _jobserver_clients:
+    for client_index, client in enumerate(_jobserver_clients):
         for attempt in range(2):
             try:
                 return await client.run_expression(
@@ -167,9 +167,12 @@ async def run_expression(
                     scratch=scratch,
                 )
             except ClientRestartRequiredError:
-                client.restart()
-                if attempt == 1:
+                if attempt == 0:
+                    client.restart()
+                    continue
+                if client_index == len(_jobserver_clients) - 1:
                     raise
+                break
     raise RuntimeError("Unreachable")
 
 

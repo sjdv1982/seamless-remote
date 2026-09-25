@@ -63,10 +63,7 @@ def expression(path):
     return Expression(checksum, path, input_celltype='plain', celltype='str')
 
 def softcancel(expr):
-    method = getattr(type(expr), 'softcancel', None)
-    if method is not None:
-        return method(expr)
-    return expr.cancel()
+    return expr.softcancel()
 
 async def setup():
     client = SlowSource()
@@ -151,10 +148,6 @@ def test_two_distinct_expressions_share_checksum_fetch_after_one_softcancel():
     ''')
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="contract ahead of code: materialization linger claims are not implemented",
-)
 def test_close_audit_clean_when_fetch_finishes_after_last_waiter_leaves():
     result = _run('''
         async def main():
