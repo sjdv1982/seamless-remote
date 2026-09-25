@@ -242,12 +242,12 @@ def test_standalone_expression_evaluation_defaults_to_auto(monkeypatch, entrypoi
     assert [call for call in calls if call != "database:set_hash_type"] == ["database:get", "jobserver:run", "database:set"]
 
 
-def test_expression_cancel_fast_path_returns_false():
+def test_expression_softcancel_fast_path_returns_false():
     get_expression_cache().clear()
     source_checksum = Buffer({"a": "local"}, "plain").get_checksum()
     expression = Expression(source_checksum, "a", input_celltype="plain", celltype="str")
 
-    assert expression.cancel() is False
+    assert expression.softcancel() is False
 
 
 def test_remote_expression_members_share_one_active_request(monkeypatch):
@@ -286,7 +286,7 @@ def test_remote_expression_members_share_one_active_request(monkeypatch):
                 break
             await asyncio.sleep(0.01)
         assert len(_active_expressions[key].members) == 2
-        assert expr1.cancel() is True
+        assert expr1.softcancel() is True
         assert len(_active_expressions[key].members) == 1
         release.set()
         with pytest.raises(asyncio.CancelledError):
@@ -326,11 +326,7 @@ def test_remote_expression_last_member_softcancel_lingers_active_request(monkeyp
     async def main():
         task = asyncio.create_task(expression.compute_async(execution="remote"))
         await started.wait()
-        softcancel = getattr(type(expression), "softcancel", None)
-        if softcancel is None:
-            assert expression.cancel() is True
-        else:
-            assert softcancel(expression) is True
+        assert expression.softcancel() is True
         with pytest.raises(asyncio.CancelledError):
             await task
 

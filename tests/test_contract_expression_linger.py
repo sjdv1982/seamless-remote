@@ -132,11 +132,6 @@ def test_fetch_is_aborted_once_the_linger_expires_with_no_waiter(monkeypatch):
     assert not _active_expressions
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="expressions.md, Placement > Rules: ClientRestartRequiredError is retried "
-    "once, then the next client; code re-raises after the retry instead",
-)
 def test_restart_required_is_retried_once_then_the_next_client(monkeypatch):
     from seamless_remote import jobserver_remote
     from seamless_remote.client import ClientRestartRequiredError
