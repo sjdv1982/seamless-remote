@@ -374,6 +374,57 @@ class DatabaseClientExecutionRecordTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.hex(), EXPR_RESULT_CHECKSUM)
 
+    async def test_expression_same_result_rewrite_is_accepted(self):
+        """expressions.md, Identity: a second write of the same key with the
+        same result is accepted."""
+        for _ in range(2):
+            result = await self.client.set_expression_result(
+                EXPR_INPUT_CHECKSUM, "a", "plain", "str", EXPR_RESULT_CHECKSUM
+            )
+            self.assertIsNone(result)
+
+    async def test_expression_conflict_is_http_409_and_keeps_the_stored_row(self):
+        """expressions.md, Identity: the server answers a different result for a
+        stored key with HTTP 409 and keeps the stored row."""
+        request = {
+            "type": "expression",
+            "checksum": EXPR_INPUT_CHECKSUM,
+            "path": "a",
+            "input_celltype": "plain",
+            "celltype": "str",
+            "value": EXPR_RESULT_CHECKSUM,
+        }
+        first = await self.server._put("expression", EXPR_INPUT_CHECKSUM, request)
+        self.assertNotIsInstance(first, web.Response)
+        conflict = await self.server._put(
+            "expression",
+            EXPR_INPUT_CHECKSUM,
+            {**request, "value": EXPR_OTHER_RESULT_CHECKSUM},
+        )
+        self.assertIsInstance(conflict, web.Response)
+        self.assertEqual(conflict.status, 409)
+        self.assertIn("Expression already exists with different result", conflict.text)
+        stored = await self.client.get_expression_result(
+            EXPR_INPUT_CHECKSUM, "a", "plain", "str"
+        )
+        self.assertEqual(stored.hex(), EXPR_RESULT_CHECKSUM)
+
+    async def test_expression_write_other_error_status_raises_connection_error(self):
+        """expressions.md, Identity: any other 4xx/5xx answer to the write raises
+        ClientConnectionError (only the key-conflict 409 is swallowed)."""
+        from aiohttp import ClientConnectionError
+
+        class _ErrorSession:
+            def put(self, path, json=None, **kwargs):
+                return _StaticRequest(_Response(500, "ERROR: internal"))
+
+        self.client._get_session = lambda: _ErrorSession()
+        self.client.restart = lambda: None  # the retry loop reinitializes
+        with self.assertRaises(ClientConnectionError):
+            await self.client.set_expression_result(
+                EXPR_INPUT_CHECKSUM, "a", "plain", "str", EXPR_RESULT_CHECKSUM
+            )
+
     async def test_hash_type_roundtrip(self):
         result = await self.client.get_hash_type(EXPR_INPUT_CHECKSUM)
         self.assertIsNone(result)

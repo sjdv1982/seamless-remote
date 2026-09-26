@@ -330,8 +330,8 @@ def test_remote_expression_last_member_softcancel_lingers_active_request(monkeyp
         with pytest.raises(asyncio.CancelledError):
             await task
 
-        # Leaving the waiting set abandons this caller immediately, but the
-        # materialization site owns the fetch through its linger.
+        # Leaving the member set abandons this caller immediately, but the
+        # shared evaluation survives through its linger.
         await asyncio.sleep(0.05)
         assert not request_cancelled.is_set()
 

@@ -1,9 +1,9 @@
 """Coverage for contracts/expressions.md, Cancellation > The linger, and the
 client-side dispatch retry rule (Placement > Rules).
 
-The linger is "a few seconds, not contractual", at most a test hook: these
-tests shorten it through the module constant and assert only its observable
-consequences.
+The linger's length is an internal constant, not a contract value (currently
+3 s): these tests shorten it through the module constant and assert only that
+the linger exists and that rejoin and expiry behave as the doc says.
 """
 
 import asyncio
@@ -54,8 +54,9 @@ def _softcancel(expression):
     return type(expression).softcancel(expression)
 
 
-def test_requester_arriving_during_the_linger_rejoins_the_fetch(monkeypatch):
-    """expressions.md, Cancellation: a requester during the linger re-registers."""
+def test_requester_arriving_during_the_linger_rejoins_the_evaluation(monkeypatch):
+    """expressions.md, The linger: a requester for the same identity arriving
+    during the linger rejoins the existing evaluation; the expiry is cleared."""
     source_checksum = Checksum("8" * 64)
     result_checksum = Buffer("rejoined", "str").get_checksum()
     calls = []
@@ -70,7 +71,7 @@ def test_requester_arriving_during_the_linger_rejoins_the_fetch(monkeypatch):
         assert _softcancel(first) is True
         with pytest.raises(asyncio.CancelledError):
             await task1
-        # Inside the linger: the fetch is still alive and the newcomer joins it.
+        # Inside the linger: the evaluation is still alive and the newcomer rejoins it.
         task2 = asyncio.create_task(second.compute_async(execution="remote"))
         await asyncio.sleep(_LINGER * 3)
         assert not cancelled.is_set(), "rejoining must cancel the pending linger expiry"
@@ -81,8 +82,9 @@ def test_requester_arriving_during_the_linger_rejoins_the_fetch(monkeypatch):
     assert calls.count("jobserver:run") == 1
 
 
-def test_fetch_completing_during_the_linger_is_recorded_and_usable(monkeypatch):
-    """expressions.md, The linger: it may still complete; its result is recorded."""
+def test_evaluation_completing_during_the_linger_is_recorded_and_usable(monkeypatch):
+    """expressions.md, The linger: a result completing during the linger is
+    recorded and stays usable."""
     source_checksum = Checksum("9" * 64)
     result_checksum = Buffer("late but kept", "str").get_checksum()
     calls = []
@@ -106,8 +108,10 @@ def test_fetch_completing_during_the_linger_is_recorded_and_usable(monkeypatch):
     assert _softcancel(expression) is False
 
 
-def test_fetch_is_aborted_once_the_linger_expires_with_no_waiter(monkeypatch):
-    """expressions.md, Cancellation: softcancel = deregister; abort after a linger."""
+def test_evaluation_is_cancelled_once_the_linger_expires_with_no_member(monkeypatch):
+    """expressions.md, Cancellation / The linger: softcancel() leaves the member
+    set; when the linger expires with no member, the shared task is cancelled
+    and nothing is cached."""
     source_checksum = Checksum("a" * 64)
     result_checksum = Buffer("never arrives", "str").get_checksum()
     calls = []
@@ -133,6 +137,8 @@ def test_fetch_is_aborted_once_the_linger_expires_with_no_waiter(monkeypatch):
 
 
 def test_restart_required_is_retried_once_then_the_next_client(monkeypatch):
+    """expressions.md, Placement > Rules: only ClientRestartRequiredError is
+    retried, once, then the next client."""
     from seamless_remote import jobserver_remote
     from seamless_remote.client import ClientRestartRequiredError
 
