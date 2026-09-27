@@ -1,16 +1,44 @@
 import sys
 import unittest
 from contextlib import AbstractAsyncContextManager
-from pathlib import Path
 from types import ModuleType
 
 import pytest
 from aiohttp import ClientConnectionError
 
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+_PREVIOUS_MODULES = {
+    name: module
+    for name, module in list(sys.modules.items())
+    if name == "seamless"
+    or name.startswith("seamless.")
+    or name == "seamless_remote"
+    or name.startswith("seamless_remote.")
+    or name == "seamless_transformer"
+    or name.startswith("seamless_transformer.")
+}
+
+
+def _restore_previous_modules():
+    for name in list(sys.modules):
+        if name == "seamless" or name.startswith("seamless."):
+            if name in _PREVIOUS_MODULES:
+                sys.modules[name] = _PREVIOUS_MODULES[name]
+            else:
+                del sys.modules[name]
+        elif name == "seamless_remote" or name.startswith("seamless_remote."):
+            if name in _PREVIOUS_MODULES:
+                sys.modules[name] = _PREVIOUS_MODULES[name]
+            else:
+                del sys.modules[name]
+        elif name == "seamless_transformer" or name.startswith(
+            "seamless_transformer."
+        ):
+            if name in _PREVIOUS_MODULES:
+                sys.modules[name] = _PREVIOUS_MODULES[name]
+            else:
+                del sys.modules[name]
+
 
 _seamless = ModuleType("seamless")
 _seamless.__path__ = []
@@ -81,6 +109,8 @@ sys.modules["seamless_transformer.record_runtime"] = _record_runtime
 from seamless_remote.jobserver_client import JobserverClient  # noqa: E402
 import seamless_remote.jobserver_client as jobserver_client  # noqa: E402
 
+_restore_previous_modules()
+
 
 class _Response(AbstractAsyncContextManager):
     def __init__(self, *, status=200, text="OK"):
@@ -117,9 +147,14 @@ class JobserverClientTests(unittest.IsolatedAsyncioTestCase):
         client.url = "http://jobserver.invalid"
         client._initialized = True
         client._get_session = lambda: session
-        return await JobserverClient.run_expression.__wrapped__(
-            client, "1" * 64, "a", "plain", "str"
-        )
+        old_envelope_to_error = jobserver_client.envelope_to_error
+        jobserver_client.envelope_to_error = _envelope_to_error
+        try:
+            return await JobserverClient.run_expression.__wrapped__(
+                client, "1" * 64, "a", "plain", "str"
+            )
+        finally:
+            jobserver_client.envelope_to_error = old_envelope_to_error
 
     async def test_run_expression_parses_structured_success_payload(self):
         client = JobserverClient()
@@ -141,6 +176,7 @@ class JobserverClientTests(unittest.IsolatedAsyncioTestCase):
                         "path": "a",
                         'input_celltype': "plain",
                         'celltype': "str",
+                        "scratch": True,
                     },
                 )
             ],

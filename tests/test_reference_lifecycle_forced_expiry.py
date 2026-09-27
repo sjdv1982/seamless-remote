@@ -122,7 +122,7 @@ def test_repeated_public_expression_access_has_one_result_role(monkeypatch):
 
 
 def test_deepcell_top_level_checksum_is_the_only_claim(monkeypatch):
-    source = Buffer({"token": uuid4().hex}, "deepcell")
+    source = Buffer({"token": uuid4().hex * 2}, "deepcell")
     checksum = source.get_checksum()
     cell = Cell(checksum=checksum, celltype="deepcell")
     claims = collect_refholder_claims([cell]).get(checksum, [])
