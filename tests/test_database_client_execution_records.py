@@ -7,11 +7,42 @@ from types import ModuleType
 
 
 ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 DATABASE_DIR = ROOT / "seamless-database"
 if str(DATABASE_DIR) not in sys.path:
     sys.path.insert(0, str(DATABASE_DIR))
+
+_PREVIOUS_MODULES = {
+    name: module
+    for name, module in list(sys.modules.items())
+    if name == "seamless"
+    or name.startswith("seamless.")
+    or name == "seamless_remote"
+    or name.startswith("seamless_remote.")
+    or name == "seamless_transformer"
+    or name.startswith("seamless_transformer.")
+}
+
+
+def _restore_previous_modules():
+    for name in list(sys.modules):
+        if name == "seamless" or name.startswith("seamless."):
+            if name in _PREVIOUS_MODULES:
+                sys.modules[name] = _PREVIOUS_MODULES[name]
+            else:
+                del sys.modules[name]
+        elif name == "seamless_remote" or name.startswith("seamless_remote."):
+            if name in _PREVIOUS_MODULES:
+                sys.modules[name] = _PREVIOUS_MODULES[name]
+            else:
+                del sys.modules[name]
+        elif name == "seamless_transformer" or name.startswith(
+            "seamless_transformer."
+        ):
+            if name in _PREVIOUS_MODULES:
+                sys.modules[name] = _PREVIOUS_MODULES[name]
+            else:
+                del sys.modules[name]
+
 
 _seamless = ModuleType("seamless")
 _seamless.__path__ = []
@@ -104,6 +135,8 @@ from database import DatabaseServer, format_response  # noqa: E402
 from database_models import _db, db_init  # noqa: E402
 from seamless_remote.client import close_all_clients  # noqa: E402
 from seamless_remote.database_client import DatabaseClient  # noqa: E402
+
+_restore_previous_modules()
 
 
 TF_CHECKSUM = "1" * 64

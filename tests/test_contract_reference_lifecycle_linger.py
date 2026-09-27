@@ -9,7 +9,7 @@ The claim is counted, not looked up by role name: an Expression's own input is
 tempref-only (§6) and nothing else holds the input here, so the input has
 exactly one refholder reference, the waiting set's. (The code logs it under the
 role ``expression materialization``, as §6 says.) The neutrality of that claim
-is a §10 gap, pinned by an xfail below. The audit is checked through its logger,
+is enforced by the final scenario below. The audit is checked through its logger,
 ``seamless.references`` (§9), not through message wording.
 
 Fresh interpreter per test, so the shutdown audit really audits this scenario
@@ -21,8 +21,6 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
-
-import pytest
 
 _WAITER_TESTS = Path(__file__).with_name("test_materialization_waiter_contract.py")
 _SETUP = re.search(r'_SETUP = """(.*?)"""', _WAITER_TESTS.read_text(), re.S).group(1)
@@ -141,12 +139,5 @@ def test_waiting_set_holds_one_claim_per_expression_identity():
     _run(_IDENTITY_BODY)
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="checksum-reference-lifecycle.md §1 (Neutral claim): contract ahead of "
-    "code: the waiting set's hold_input claims with scratch=True "
-    "(seamless/checksum/expression.py) and leaves an owned, published input marked "
-    "scratch",
-)
 def test_waiting_set_claim_is_neutral_about_scratch_status():
     _run(_NEUTRAL_BODY)
