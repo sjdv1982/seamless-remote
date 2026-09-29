@@ -7,6 +7,10 @@ the linger exists and that rejoin and expiry behave as the doc says.
 """
 
 import asyncio
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pytest
 
