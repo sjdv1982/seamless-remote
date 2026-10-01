@@ -10,8 +10,8 @@ import pytest
 from seamless import Buffer, Checksum
 from seamless.checksum.expression import (
     ExpressionKey,
-    evaluate_expression_async,
-    evaluate_expression_remote,
+    evaluate_expression_local_async,
+    evaluate_expression_placed,
     get_expression_cache,
 )
 
@@ -57,7 +57,7 @@ def test_evaluate_expression_async_reads_from_local_buffer_directory(monkeypatch
         monkeypatch.setattr(buffer_remote, "_read_folders_clients", [client])
 
         result = asyncio.run(
-            evaluate_expression_async(
+            evaluate_expression_local_async(
                 key.input_checksum,
                 key.path,
                 key.input_celltype,
@@ -100,7 +100,7 @@ def test_auto_placement_treats_a_configured_read_folder_as_local(monkeypatch):
     get_expression_cache().clear()
 
     result = asyncio.run(
-        evaluate_expression_remote(
+        evaluate_expression_placed(
             source_checksum,
             "value",
             "plain",
