@@ -10,7 +10,7 @@ from seamless import Buffer, CacheMissError, Checksum, Expression
 from seamless.checksum import expression as expression_mod
 from seamless.checksum.expression import (
     _active_expressions,
-    evaluate_expression_remote,
+    evaluate_expression_placed,
     get_expression_cache,
 )
 from seamless.checksum.hash_type import HashType, get_hash_type_cache
@@ -32,7 +32,7 @@ def test_remote_expression_dispatch_writes_expression_cache(monkeypatch):
     )
 
     result = asyncio.run(
-        evaluate_expression_remote(
+        evaluate_expression_placed(
             source_checksum,
             "a",
             "plain",
@@ -61,7 +61,7 @@ def test_database_expression_cache_hit_precedes_auto_location(monkeypatch):
     )
 
     result = asyncio.run(
-        evaluate_expression_remote(
+        evaluate_expression_placed(
             source_checksum,
             "a",
             "plain",
@@ -89,7 +89,7 @@ def test_memory_expression_cache_hit_precedes_remote_lookups(monkeypatch):
     )
 
     result = asyncio.run(
-        evaluate_expression_remote(
+        evaluate_expression_placed(
             source_checksum,
             "a",
             "plain",
@@ -114,7 +114,7 @@ def test_auto_expression_uses_local_buffer_before_remote_dispatch(monkeypatch):
     _install_fake_remotes(monkeypatch, expression_rows, {key: result_checksum.hex()}, calls)
 
     result = asyncio.run(
-        evaluate_expression_remote(
+        evaluate_expression_placed(
             source_checksum,
             "a",
             "plain",
@@ -124,6 +124,9 @@ def test_auto_expression_uses_local_buffer_before_remote_dispatch(monkeypatch):
     )
 
     assert result == result_checksum
+    from seamless.caching import buffer_writer
+
+    buffer_writer.flush()
     assert [call for call in calls if call != "database:set_hash_type"] == ["database:get", "database:set"]
     source_ref.clear()
 
@@ -137,7 +140,7 @@ def test_auto_buffer_free_conversion_stays_local_without_input_buffer(monkeypatc
     _install_fake_remotes(monkeypatch, {}, {}, calls)
 
     result = asyncio.run(
-        evaluate_expression_remote(
+        evaluate_expression_placed(
             source_checksum,
             "",
             "bool",
@@ -146,6 +149,9 @@ def test_auto_buffer_free_conversion_stays_local_without_input_buffer(monkeypatc
         )
     )
 
+    from seamless.caching import buffer_writer
+
+    buffer_writer.flush()
     assert result == Buffer(1, "int").get_checksum()
     assert [call for call in calls if call != "database:set_hash_type"] == ["database:get", "database:set"]
 
@@ -169,7 +175,7 @@ def test_auto_expression_dispatches_when_input_is_only_on_hashserver(monkeypatch
     )
 
     result = asyncio.run(
-        evaluate_expression_remote(
+        evaluate_expression_placed(
             source_checksum,
             "a",
             "plain",
@@ -202,7 +208,7 @@ def test_auto_expression_without_jobserver_resolves_input_locally(monkeypatch):
     )
 
     result = asyncio.run(
-        evaluate_expression_remote(
+        evaluate_expression_placed(
             source_checksum,
             "a",
             "plain",
@@ -212,6 +218,9 @@ def test_auto_expression_without_jobserver_resolves_input_locally(monkeypatch):
     )
 
     assert result == result_checksum
+    from seamless.caching import buffer_writer
+
+    buffer_writer.flush()
     assert [call for call in calls if call != "database:set_hash_type"] == ["database:get", "hashserver:get", "database:set"]
 
 
@@ -349,7 +358,7 @@ def test_missing_jobserver_failure_policy(monkeypatch, execution):
     _install_fake_remotes(monkeypatch, {}, {}, calls, jobserver_available=False)
     error = CacheMissError if execution == "auto" else RuntimeError
     with pytest.raises(error):
-        asyncio.run(evaluate_expression_remote(
+        asyncio.run(evaluate_expression_placed(
             Checksum("f" * 64), "a", "plain", "str", execution=execution
         ))
     assert "jobserver:run" not in calls
@@ -367,7 +376,7 @@ def test_auto_does_not_fallback_after_jobserver_failure(monkeypatch):
 
     monkeypatch.setattr(jobserver_remote, "run_expression", fail)
     with pytest.raises(ConnectionError, match="configured jobserver failed"):
-        asyncio.run(evaluate_expression_remote(Checksum("e" * 64), "a", "plain", "str"))
+        asyncio.run(evaluate_expression_placed(Checksum("e" * 64), "a", "plain", "str"))
     assert "hashserver:get" not in calls
 
 
@@ -407,7 +416,7 @@ def test_auto_without_remote_package_raises_cache_miss(monkeypatch):
     get_expression_cache().clear()
     monkeypatch.setitem(sys.modules, "seamless_remote", None)
     with pytest.raises(CacheMissError):
-        asyncio.run(evaluate_expression_remote(Checksum("d" * 64), "a", "plain", "str"))
+        asyncio.run(evaluate_expression_placed(Checksum("d" * 64), "a", "plain", "str"))
 
 
 @pytest.mark.parametrize("execution", ["auto", "remote"])
@@ -425,7 +434,7 @@ def test_jobserver_cache_miss_propagates_without_fallback(monkeypatch, execution
     monkeypatch.setattr(jobserver_remote, "run_expression", miss)
     with pytest.raises(CacheMissError) as info:
         asyncio.run(
-            evaluate_expression_remote(
+            evaluate_expression_placed(
                 source_checksum,
                 "a",
                 "plain",
@@ -459,7 +468,7 @@ def test_local_evaluation_stores_result_hash_type(monkeypatch):
     get_hash_type_cache().pop(result_checksum, None)
     try:
         result = asyncio.run(
-            evaluate_expression_remote(
+            evaluate_expression_placed(
                 source_checksum,
                 "a",
                 "plain",
