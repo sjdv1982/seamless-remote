@@ -134,7 +134,7 @@ from aiohttp import web  # noqa: E402
 from database import DatabaseServer, format_response  # noqa: E402
 from database_models import _db, db_init  # noqa: E402
 from seamless_remote.client import close_all_clients  # noqa: E402
-from seamless_remote.database_client import DatabaseClient  # noqa: E402
+from seamless_remote.database_client import DatabaseClient, TransformationResultConflict  # noqa: E402
 
 _restore_previous_modules()
 
@@ -269,6 +269,31 @@ class DatabaseClientExecutionRecordTests(unittest.IsolatedAsyncioTestCase):
         if not _db.is_closed():
             _db.close()
         self._tmpdir.cleanup()
+
+    async def test_transformation_conflict_and_automatic_report(self):
+        await self.client.set_execution_record(TF_CHECKSUM, RESULT_CHECKSUM, _record())
+        session = _FakeSession(self.server)
+        original_put = session.put
+        puts = []
+        def put(*args, **kwargs):
+            puts.append(kwargs["json"])
+            return original_put(*args, **kwargs)
+        session.put = put
+        self.client._get_session = lambda: session
+        def forbidden_restart(*args, **kwargs):
+            raise AssertionError("conflict restarted client")
+        self.client.restart = forbidden_restart
+        with self.assertRaises(TransformationResultConflict):
+            await self.client.set_transformation_result(TF_CHECKSUM, EXPR_OTHER_RESULT_CHECKSUM)
+        self.assertEqual(len(puts), 1)
+        for _ in range(2):
+            self.assertTrue(await self.client.report_irreproducible_result(TF_CHECKSUM, EXPR_OTHER_RESULT_CHECKSUM))
+        observations = await self.client.get_irreproducible_records(TF_CHECKSUM)
+        self.assertEqual(len(observations), 1)
+        self.assertEqual(observations[0]["result"], EXPR_OTHER_RESULT_CHECKSUM)
+        self.assertEqual(await self.client.get_execution_record(TF_CHECKSUM), _record())
+        self.assertFalse(await self.client.report_irreproducible_result(TF_CHECKSUM, RESULT_CHECKSUM))
+        self.assertFalse(await self.client.report_irreproducible_result("f" * 64, RESULT_CHECKSUM))
 
     async def test_execution_record_roundtrip_and_irreproducible_lookup(self):
         record = _record()

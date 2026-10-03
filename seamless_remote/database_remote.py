@@ -66,6 +66,16 @@ _write_database_clients: list[DatabaseClient] = []
 _DEBUG = os.environ.get("SEAMLESS_DEBUG_REMOTE_DB", "").lower() in ("1", "true", "yes")
 
 
+def has_read_database() -> bool:
+    """Whether this process can query a configured read database."""
+    from seamless import is_worker
+    from .client import _remote_clients_allowed_in_worker
+
+    return bool(_read_database_clients) and (
+        not is_worker() or _remote_clients_allowed_in_worker()
+    )
+
+
 def has_write_server() -> bool:
     """Return True when at least one database write client is configured."""
 
@@ -333,6 +343,15 @@ async def set_bucket_probe(
             bucket_kind, label, bucket_checksum, freshness_tokens, captured_at
         )
         if ok is not False:
+            written = True
+    return written
+
+
+async def report_irreproducible_result(tf_checksum: Checksum, result_checksum: Checksum):
+    """Report automatic divergence to all write databases."""
+    written = False
+    for client in _write_database_clients:
+        if await client.report_irreproducible_result(tf_checksum, result_checksum):
             written = True
     return written
 

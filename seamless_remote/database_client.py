@@ -13,6 +13,10 @@ from seamless.util.pylru import lrucache
 from .client import Client, _retry_operation, close_all_clients
 
 
+class TransformationResultConflict(Exception):
+    """A transformation already has a different recorded result."""
+
+
 class DatabaseClient(Client):
     """Async client for Seamless databases."""
 
@@ -429,6 +433,8 @@ class DatabaseClient(Client):
         async with session_async.put(path, json=request) as response:
             if int(response.status / 100) in (4, 5):
                 text = await response.text()
+                if response.status == 409 and "Transformation already exists with different result" in text:
+                    raise TransformationResultConflict(text)
                 raise ClientConnectionError(f"Error {response.status}: {text}")
 
     @_retry_operation
@@ -544,6 +550,27 @@ class DatabaseClient(Client):
             if int(response.status / 100) in (4, 5):
                 text = await response.text()
                 raise ClientConnectionError(f"Error {response.status}: {text}")
+
+    @_retry_operation
+    async def report_irreproducible_result(
+        self, tf_checksum: Checksum, result_checksum: Checksum
+    ) -> bool:
+        """Record an automatic divergence without changing the recorded result."""
+        if self.readonly:
+            raise AttributeError("Read-only database client")
+        request = {
+            "type": "irreproducible",
+            "checksum": Checksum(tf_checksum).hex(),
+            "result": Checksum(result_checksum).hex(),
+            "mode": "automatic",
+        }
+        async with self._get_session().put(self._require_url(), json=request) as response:
+            if response.status in (404, 409):
+                return False
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+        return True
 
     @_retry_operation
     async def undo_transformation_result(
