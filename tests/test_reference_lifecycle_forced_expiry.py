@@ -145,7 +145,7 @@ def test_equal_expressions_hold_same_result_independently(monkeypatch):
     source, first = _expression_fixture()
     second = Expression(first.input_checksum, first.path, input_celltype=first.input_celltype, celltype=first.celltype)
     result = first._evaluate_internal()
-    assert second._publish_result(result) == result
+    assert second._hold_result(result) == result
     first._enable_result_holding()
     second._enable_result_holding()
     cache = get_buffer_cache()

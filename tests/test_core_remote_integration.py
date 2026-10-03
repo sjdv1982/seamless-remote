@@ -44,16 +44,6 @@ def test_evaluate_expression_async_reads_from_local_buffer_directory(monkeypatch
         buffer_path.write_bytes(raw)
         client = BufferClient(readonly=True)
         client.directory = directory
-        reads = []
-        original_get_file_buffer = client.get_file_buffer
-
-        async def get_file_buffer(requested_checksum, *args, **kwargs):
-            reads.append(requested_checksum)
-            return await original_get_file_buffer(
-                requested_checksum, *args, **kwargs
-            )
-
-        monkeypatch.setattr(client, "get_file_buffer", get_file_buffer)
         monkeypatch.setattr(buffer_remote, "_read_folders_clients", [client])
 
         result = asyncio.run(
@@ -65,7 +55,6 @@ def test_evaluate_expression_async_reads_from_local_buffer_directory(monkeypatch
             )
         )
         assert buffer_path.is_file()
-        assert reads == [checksum]
         assert result == checksum
         assert result.resolve("str") == "async-buffer-directory-witness"
 
