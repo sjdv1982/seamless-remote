@@ -41,6 +41,9 @@ def test_remote_expression_dispatch_writes_expression_cache(monkeypatch):
         )
     )
 
+    from seamless.caching import buffer_writer
+
+    buffer_writer.flush()
     assert result == result_checksum
     assert expression_rows[key] == result_checksum
     assert [call for call in calls if call != "database:set_hash_type"] == ["database:get", "jobserver:run", "database:set"]
@@ -185,6 +188,9 @@ def test_auto_expression_dispatches_when_input_is_only_on_hashserver(monkeypatch
     )
 
     assert result == result_checksum
+    from seamless.caching import buffer_writer
+
+    buffer_writer.flush()
     assert [call for call in calls if call != "database:set_hash_type"] == ["database:get", "jobserver:run", "database:set"]
 
 
@@ -221,7 +227,7 @@ def test_auto_expression_without_jobserver_resolves_input_locally(monkeypatch):
     from seamless.caching import buffer_writer
 
     buffer_writer.flush()
-    assert [call for call in calls if call != "database:set_hash_type"] == ["database:get", "hashserver:get", "database:set"]
+    assert [call for call in calls if call != "database:set_hash_type"] == ["database:get", "hashserver:get_buffer_lengths", "hashserver:get", "database:set"]
 
 
 @pytest.mark.parametrize(
@@ -251,6 +257,9 @@ def test_standalone_expression_evaluation_defaults_to_auto(monkeypatch, entrypoi
     result = asyncio.run(evaluate()) if entrypoint.endswith("async") else evaluate()
 
     assert result == result_checksum
+    from seamless.caching import buffer_writer
+
+    buffer_writer.flush()
     assert [call for call in calls if call != "database:set_hash_type"] == ["database:get", "jobserver:run", "database:set"]
 
 
@@ -306,6 +315,9 @@ def test_remote_expression_members_share_one_active_request(monkeypatch):
         assert await task2 == result_checksum
 
     asyncio.run(main())
+    from seamless.caching import buffer_writer
+
+    buffer_writer.flush()
     assert [call for call in calls if call != "database:set_hash_type"] == ["database:get", "jobserver:run", "database:get", "database:set"]
 
 
@@ -362,7 +374,8 @@ def test_missing_jobserver_failure_policy(monkeypatch, execution):
             Checksum("f" * 64), "a", "plain", "str", execution=execution
         ))
     assert "jobserver:run" not in calls
-    assert ("hashserver:get" in calls) == (execution == "auto")
+    assert ("hashserver:get_buffer_lengths" in calls) == (execution == "auto")
+    assert "hashserver:get" not in calls
 
 
 def test_auto_does_not_fallback_after_jobserver_failure(monkeypatch):
