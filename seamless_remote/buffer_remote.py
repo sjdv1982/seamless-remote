@@ -13,6 +13,7 @@ import aiofiles.os
 
 DISABLED = False  # to disable automatic activation during tests
 
+_HAS_CHUNK = 10_000
 _launched_clients: dict[tuple, BufferLaunchedClient] = {}
 _extern_clients: dict[str, BufferClient] = {}
 
@@ -226,6 +227,41 @@ async def _get_buffer(checksum: Checksum) -> Buffer | None:
         buf = await client.get(checksum)
         if buf is not None:
             return buf
+
+
+async def has_buffers(checksums: list[Checksum]) -> list[bool]:
+    """Return hashserver presence for each checksum, ORed across read servers.
+
+    Read folders are local inputs to evaluation and do not count as remote
+    placement. The server API returns lengths; a zero-length buffer is still
+    present, while a boolean False from a test or alternate client is absent.
+    """
+    checksums = [Checksum(checksum) for checksum in checksums]
+    present = [False] * len(checksums)
+    if not checksums:
+        return present
+
+    for client in _read_server_clients:
+        if not getattr(client, "url", None):
+            continue
+        for start in range(0, len(checksums), _HAS_CHUNK):
+            if all(present):
+                return present
+            chunk = checksums[start : start + _HAS_CHUNK]
+            try:
+                lengths = await client.buffer_lengths(chunk)
+            except Exception:
+                continue
+            if not isinstance(lengths, list) or len(lengths) != len(chunk):
+                continue
+            for offset, length in enumerate(lengths):
+                index = start + offset
+                if isinstance(length, bool):
+                    present[index] = present[index] or length
+                elif isinstance(length, int) and length >= 0:
+                    present[index] = True
+
+    return present
 
 
 async def get_buffer_lengths(checksums: list[Checksum]) -> list[int | None]:
