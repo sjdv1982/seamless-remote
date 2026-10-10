@@ -205,6 +205,21 @@ async def get_expression_result(
             return result
 
 
+async def get_celljoin_result(
+    celljoin_checksum: Checksum, celltype: str
+) -> Checksum | None:
+    """Return a cached celljoin result from remote databases, if known."""
+    celljoin_checksum = Checksum(celljoin_checksum)
+    for client in _read_database_clients:
+        _debug(
+            f"query {client} for celljoin {celljoin_checksum.hex()} {celltype!r}"
+        )
+        result = await client.get_celljoin_result(celljoin_checksum, celltype)
+        _debug(f"client {client} returned {result}")
+        if result is not None:
+            return result
+
+
 async def get_hash_type(checksum: Checksum) -> int | None:
     """Return cached HashType word from remote databases, if known."""
 
@@ -226,6 +241,17 @@ async def get_rev_expressions(result_checksum: Checksum) -> list[dict] | None:
     for client in _read_database_clients:
         _debug(f"query {client} for rev expression {result_checksum.hex()}")
         result = await client.get_rev_expressions(result_checksum)
+        _debug(f"client {client} returned {result}")
+        if result is not None:
+            return result
+
+
+async def get_rev_celljoins(result_checksum: Checksum) -> list[dict] | None:
+    """Return celljoins that produce result_checksum, if known."""
+    result_checksum = Checksum(result_checksum)
+    for client in _read_database_clients:
+        _debug(f"query {client} for rev celljoin {result_checksum.hex()}")
+        result = await client.get_rev_celljoins(result_checksum)
         _debug(f"client {client} returned {result}")
         if result is not None:
             return result
@@ -296,6 +322,22 @@ async def set_expression_result(
     for client in _write_database_clients:
         ok = await client.set_expression_result(
             input_checksum, path, input_celltype, celltype, result_checksum
+        )
+        if ok is not False:
+            written = True
+    return written
+
+
+async def set_celljoin_result(
+    celljoin_checksum: Checksum, celltype: str, result_checksum: Checksum
+):
+    """Write a celljoin result to remote databases."""
+    celljoin_checksum = Checksum(celljoin_checksum)
+    result_checksum = Checksum(result_checksum)
+    written = False
+    for client in _write_database_clients:
+        ok = await client.set_celljoin_result(
+            celljoin_checksum, celltype, result_checksum
         )
         if ok is not False:
             written = True

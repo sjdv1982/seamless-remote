@@ -131,6 +131,37 @@ class JobserverClient(Client):
         return _result_checksum(result_checksum)
 
     @_retry_operation
+    async def run_celljoin(
+        self, celljoin_checksum, celltype: str, *, scratch: bool = True
+    ) -> Checksum:
+        session_async = self._get_session()
+        celljoin_checksum = Checksum(celljoin_checksum)
+        request = {
+            "celljoin_checksum": celljoin_checksum.hex(),
+            "celltype": celltype,
+            "scratch": bool(scratch),
+        }
+        path_url = self._require_url() + "/run-celljoin"
+        async with session_async.get(path_url, json=request) as response:
+            if response.status != 200:
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        try:
+            payload = json.loads(result0)
+        except Exception as exc:
+            raise ClientConnectionError(
+                f"Malformed jobserver celljoin payload: {result0!r}"
+            ) from exc
+        _raise_job_error(payload)
+        result_checksum = payload.get("result_checksum")
+        if not isinstance(result_checksum, str):
+            raise ClientConnectionError(
+                f"Malformed jobserver celljoin payload: {payload!r}"
+            )
+        return _result_checksum(result_checksum)
+
+    @_retry_operation
     async def cancel_transformation(self, tf_checksum):
         session_async = self._get_session()
         tf_checksum = Checksum(tf_checksum)

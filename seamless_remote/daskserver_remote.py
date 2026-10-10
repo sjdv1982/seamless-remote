@@ -186,3 +186,10 @@ async def run_expression(
     return await dispatch_expression(
         input_checksum, path, input_celltype, celltype, scratch=scratch
     )
+
+async def run_celljoin(celljoin_checksum, celltype, *, scratch=True):
+    from seamless_transformer.worker import dispatch_celljoin
+
+    return await dispatch_celljoin(
+        celljoin_checksum, celltype, scratch=scratch
+    )

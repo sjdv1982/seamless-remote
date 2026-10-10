@@ -175,6 +175,27 @@ async def run_expression(
                 break
     raise RuntimeError("Unreachable")
 
+async def run_celljoin(
+    celljoin_checksum: Checksum, celltype: str, *, scratch: bool = False
+) -> Checksum:
+    if not _jobserver_clients:
+        raise RuntimeError("No jobserver clients are available")
+    celljoin_checksum = Checksum(celljoin_checksum)
+    for client_index, client in enumerate(_jobserver_clients):
+        for attempt in range(2):
+            try:
+                return await client.run_celljoin(
+                    celljoin_checksum, celltype, scratch=scratch
+                )
+            except ClientRestartRequiredError:
+                if attempt == 0:
+                    client.restart()
+                    continue
+                if client_index == len(_jobserver_clients) - 1:
+                    raise
+                break
+    raise RuntimeError("Unreachable")
+
 
 async def cancel_transformation_async(tf_checksum: Checksum) -> bool:
     if not _jobserver_clients:

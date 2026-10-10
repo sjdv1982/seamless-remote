@@ -180,6 +180,43 @@ class DatabaseClient(Client):
         finally:
             semaphore.release()
 
+    @_retry_operation
+    async def get_celljoin_result(
+        self, celljoin_checksum: Checksum, celltype: str
+    ) -> Checksum | None:
+        semaphore = self._get_semaphore()
+        if semaphore is None:
+            return await self._get_celljoin_result_unthrottled(
+                celljoin_checksum, celltype
+            )
+        await semaphore.acquire()
+        try:
+            return await self._get_celljoin_result_unthrottled(
+                celljoin_checksum, celltype
+            )
+        finally:
+            semaphore.release()
+
+    async def _get_celljoin_result_unthrottled(
+        self, celljoin_checksum: Checksum, celltype: str
+    ) -> Checksum | None:
+        session_async = self._get_session()
+        celljoin_checksum = Checksum(celljoin_checksum)
+        request = {
+            "type": "celljoin",
+            "checksum": celljoin_checksum.hex(),
+            "celltype": celltype,
+        }
+        url = self._require_url()
+        async with session_async.get(url, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                if response.status == 404:
+                    return None
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        return Checksum(result0)
+
     async def _get_expression_result_unthrottled(
         self,
         input_checksum: Checksum,
@@ -259,6 +296,64 @@ class DatabaseClient(Client):
             return await self._get_rev_expressions_unthrottled(result_checksum)
         finally:
             semaphore.release()
+
+    @_retry_operation
+    async def get_rev_celljoins(
+        self, result_checksum: Checksum
+    ) -> list[dict] | None:
+        semaphore = self._get_semaphore()
+        if semaphore is None:
+            return await self._get_rev_celljoins_unthrottled(result_checksum)
+        await semaphore.acquire()
+        try:
+            return await self._get_rev_celljoins_unthrottled(result_checksum)
+        finally:
+            semaphore.release()
+
+    async def _get_rev_celljoins_unthrottled(
+        self, result_checksum: Checksum
+    ) -> list[dict] | None:
+        session_async = self._get_session()
+        result_checksum = Checksum(result_checksum)
+        request = {
+            "type": "rev_celljoins",
+            "checksum": result_checksum.hex(),
+        }
+        url = self._require_url()
+        async with session_async.get(url, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                if response.status == 404:
+                    return None
+                text = await response.text()
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+            result0 = await response.text()
+        try:
+            payload = json.loads(result0)
+        except Exception as exc:
+            raise ClientConnectionError(
+                f"Malformed response for rev_celljoins: {result0!r}"
+            ) from exc
+        if payload is None:
+            return None
+        if not isinstance(payload, list):
+            raise ClientConnectionError(
+                f"Malformed response for rev_celljoins: {payload!r}"
+            )
+        result = []
+        for item in payload:
+            if not isinstance(item, dict) or not isinstance(item.get("celltype"), str):
+                raise ClientConnectionError(
+                    f"Malformed response for rev_celljoins: {payload!r}"
+                )
+            celljoin = dict(item)
+            try:
+                celljoin["checksum"] = Checksum(celljoin["checksum"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ClientConnectionError(
+                    f"Malformed response for rev_celljoins: {payload!r}"
+                ) from exc
+            result.append(celljoin)
+        return result
 
     async def _get_rev_expressions_unthrottled(
         self, result_checksum: Checksum
@@ -467,6 +562,35 @@ class DatabaseClient(Client):
                 if (
                     response.status == 409
                     and "Expression already exists with different result" in text
+                ):
+                    return False
+                raise ClientConnectionError(f"Error {response.status}: {text}")
+
+    @_retry_operation
+    async def set_celljoin_result(
+        self,
+        celljoin_checksum: Checksum,
+        celltype: str,
+        result_checksum: Checksum,
+    ):
+        if self.readonly:
+            raise AttributeError("Read-only database client")
+        session_async = self._get_session()
+        celljoin_checksum = Checksum(celljoin_checksum)
+        result_checksum = Checksum(result_checksum)
+        request = {
+            "type": "celljoin",
+            "checksum": celljoin_checksum.hex(),
+            "celltype": celltype,
+            "value": result_checksum.hex(),
+        }
+        url = self._require_url()
+        async with session_async.put(url, json=request) as response:
+            if int(response.status / 100) in (4, 5):
+                text = await response.text()
+                if (
+                    response.status == 409
+                    and "CellJoin already exists with different result" in text
                 ):
                     return False
                 raise ClientConnectionError(f"Error {response.status}: {text}")
