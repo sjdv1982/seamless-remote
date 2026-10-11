@@ -71,22 +71,28 @@ class JobserverClient(Client):
             _raise_job_error(payload)
             remote_job_written = payload.get("remote_job_written")
             if isinstance(remote_job_written, str):
-                return {
+                response = {
                     "remote_job_written": remote_job_written,
                     "record_runtime": payload.get("record_runtime"),
                 }
+                if "logs" in payload:
+                    response["logs"] = payload["logs"]
+                return response
             result_checksum = payload.get("result_checksum")
             if not isinstance(result_checksum, str):
                 raise ClientConnectionError(
                     f"Malformed jobserver success payload: {payload!r}"
                 )
-            return {
+            response = {
                 "result_checksum": _result_checksum(result_checksum),
                 "probe_context": payload.get("probe_context"),
                 "compilation_context": payload.get("compilation_context"),
                 "job_validation": payload.get("job_validation"),
                 "record_runtime": payload.get("record_runtime"),
             }
+            if "logs" in payload:
+                response["logs"] = payload["logs"]
+            return response
         if parse_remote_job_written(result0) is not None:
             return result0
         return _result_checksum(result0)
