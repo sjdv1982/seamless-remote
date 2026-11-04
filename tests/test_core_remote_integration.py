@@ -20,7 +20,7 @@ def _raise_if_fetched():
     raise AssertionError("this conversion must not fetch its source buffer")
 
 
-def test_evaluate_expression_async_reads_from_local_buffer_directory(monkeypatch):
+def test_evaluate_expression_async_reads_from_local_buffer_directory(monkeypatch, request):
     from seamless.checksum import expression
     from seamless.checksum.hash_type import register_hash_type_for_buffer
     from seamless_remote import buffer_remote
@@ -34,7 +34,7 @@ def test_evaluate_expression_async_reads_from_local_buffer_directory(monkeypatch
 
     monkeypatch.setattr(
         expression,
-        "_get_local_buffer",
+        "_get_local_memory_buffer",
         lambda *args, **kwargs: _raise_if_fetched(),
     )
     monkeypatch.setattr(buffer_remote, "_read_server_clients", [])
@@ -44,7 +44,8 @@ def test_evaluate_expression_async_reads_from_local_buffer_directory(monkeypatch
         buffer_path.write_bytes(raw)
         client = BufferClient(readonly=True)
         client.directory = directory
-        monkeypatch.setattr(buffer_remote, "_read_folders_clients", [client])
+        buffer_remote._replace_read_folder_sources([client])
+        request.addfinalizer(lambda: buffer_remote._replace_read_folder_sources([]))
 
         result = asyncio.run(
             evaluate_expression_local_async(
@@ -61,8 +62,13 @@ def test_evaluate_expression_async_reads_from_local_buffer_directory(monkeypatch
     assert not Path(directory).exists()
 
 
-def test_auto_placement_treats_a_configured_read_folder_as_local(monkeypatch):
+def test_auto_placement_treats_a_configured_read_folder_as_local(monkeypatch, request):
     from seamless.caching.buffer_cache import get_buffer_cache
+    from seamless.caching.buffer_source import (
+        BufferSource,
+        replace_buffer_sources,
+        unregister_buffer_sources,
+    )
     from seamless.checksum.cached_calculate_checksum import checksum_cache
     from seamless_remote import buffer_remote, jobserver_remote
 
@@ -82,7 +88,21 @@ def test_auto_placement_treats_a_configured_read_folder_as_local(monkeypatch):
     async def forbidden_dispatch(*args, **kwargs):
         pytest.fail("an explicitly configured local read folder must not dispatch")
 
-    monkeypatch.setattr(buffer_remote, "_read_folders_clients", [ReadFolder()])
+    folder = ReadFolder()
+    owner = object()
+    replace_buffer_sources(
+        owner,
+        BufferSource(
+            get_buffer_async=folder.get_file_buffer,
+            has_buffer=lambda checksum: checksum == source_checksum,
+            get_buffer_length=lambda checksum: len(source.content)
+            if checksum == source_checksum
+            else None,
+            returns_verified_buffer=True,
+        ),
+    )
+    request.addfinalizer(lambda: unregister_buffer_sources(owner))
+    monkeypatch.setattr(buffer_remote, "_read_folders_clients", [])
     monkeypatch.setattr(buffer_remote, "_read_server_clients", [])
     monkeypatch.setattr(jobserver_remote, "has_jobserver", lambda: True)
     monkeypatch.setattr(jobserver_remote, "run_expression", forbidden_dispatch)

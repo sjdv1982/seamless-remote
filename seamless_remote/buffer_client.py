@@ -226,46 +226,74 @@ class BufferClient(Client):
     async def get_file_buffer(
         self, checksum: Checksum, timeout: float = 10
     ) -> Buffer | None:
-        """Read a buffer from the configured directory, verifying checksum."""
+        """Read and validate a buffer from the configured directory."""
+        return await asyncio.to_thread(
+            self.get_file_buffer_sync, checksum, timeout
+        )
+
+    def _file_buffer_candidates(self, checksum: Checksum):
+        directory = self._require_directory()
+        checksum = Checksum(checksum)
+        return (
+            os.path.join(directory, checksum.hex()),
+            os.path.join(directory, checksum.hex()[:2], checksum.hex()),
+        )
+
+    def has_file_buffer(self, checksum: Checksum) -> bool:
+        """Check configured folder metadata without reading buffer contents."""
+        return any(
+            os.path.isfile(filename)
+            for filename in self._file_buffer_candidates(checksum)
+        )
+
+    def get_file_buffer_length(self, checksum: Checksum) -> int | None:
+        """Return a configured folder file's size without reading its contents."""
+        for filename in self._file_buffer_candidates(checksum):
+            try:
+                stat = os.stat(filename)
+            except FileNotFoundError:
+                continue
+            if os.path.isfile(filename):
+                return stat.st_size
+        return None
+
+    def get_file_buffer_sync(
+        self, checksum: Checksum, timeout: float = 10
+    ) -> Buffer | None:
+        """Synchronously read and verify a buffer from a configured folder."""
         directory = self._require_directory()
         checksum = Checksum(checksum)
         assert checksum
-        filename1 = os.path.join(directory, checksum.hex())
-        filenames = [filename1]
-        subdirectory = os.path.join(directory, checksum.hex()[:2])
-        if os.path.exists(subdirectory):
-            filename2 = os.path.join(subdirectory, checksum.hex())
-            filenames = [filename1, filename2]
-        for filename in filenames:
-            if await aiofiles.os.path.exists(filename):
-                async with aiofiles.open(filename, "rb") as f:
-                    buf_bytes = await f.read()
-                buf = Buffer(buf_bytes)
-                buf_checksum = await buf.get_checksum_async()
-                if buf_checksum == checksum:
-                    return buf
+        global_lockfile = os.path.join(directory, ".LOCK")
+        for filename in self._file_buffer_candidates(checksum):
+            if os.path.exists(filename):
+                try:
+                    with open(filename, "rb") as f:
+                        content = f.read()
+                except FileNotFoundError:
+                    content = None
+                if content is not None:
+                    buffer = Buffer(content)
+                    if buffer.get_checksum() == checksum:
+                        return buffer
 
-            global_lockfile = os.path.join(directory, ".LOCK")
-            lockfile = filename + ".LOCK"
             start_time = time.time()
-            while 1:
-                for lockf in [global_lockfile, lockfile]:
-                    if await aiofiles.os.path.exists(lockf):
-                        break
-                else:
-                    break
-                await asyncio.sleep(0.5)
+            lockfile = filename + ".LOCK"
+            while os.path.exists(global_lockfile) or os.path.exists(lockfile):
                 if time.time() - start_time > timeout:
                     return None
-            if not await aiofiles.os.path.exists(filename):
+                time.sleep(0.5)
+            if not os.path.exists(filename):
                 continue
-            async with aiofiles.open(filename, "rb") as f:
-                buf0 = await f.read()
-            buf = Buffer(buf0)
-            buf_checksum = await buf.get_checksum_async()
-            if buf_checksum != checksum:
+            try:
+                with open(filename, "rb") as f:
+                    content = f.read()
+            except FileNotFoundError:
+                continue
+            buffer = Buffer(content)
+            if buffer.get_checksum() != checksum:
                 return None
-            return buf
+            return buffer
         return None
 
 
@@ -303,6 +331,12 @@ class BufferLaunchedClient(BufferClient):
             mode=mode,
         )
         self.local = "hostname" not in self.launch_config
+        if self.local:
+            self.directory = pathlib.Path(
+                self.launch_config["workdir"]
+            ).expanduser().as_posix()
+        else:
+            self.directory = None
 
     def _do_init(self):
         import remote_http_launcher
