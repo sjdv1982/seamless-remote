@@ -80,8 +80,24 @@ _read_server_clients: list[BufferClient] = []
 _read_folders_clients: list[BufferClient] = []
 _write_server_clients: list[BufferClient] = []
 _pending_buffer_fetches: dict[
-    tuple[asyncio.AbstractEventLoop, Checksum], tuple[asyncio.Task, int]
+    tuple[asyncio.AbstractEventLoop, Checksum, bool], tuple[asyncio.Task, int]
 ] = {}
+_read_folder_source_owner = object()
+
+
+def _replace_read_folder_sources(clients):
+    from seamless.caching.buffer_source import BufferSource, replace_buffer_sources
+
+    sources = [
+        BufferSource(
+            get_buffer=client.get_file_buffer_sync,
+            has_buffer=client.has_file_buffer,
+            get_buffer_length=client.get_file_buffer_length,
+            returns_verified_buffer=True,
+        )
+        for client in clients
+    ]
+    replace_buffer_sources(_read_folder_source_owner, sources)
 
 
 def has_write_server() -> bool:
@@ -166,6 +182,7 @@ def activate(
     _read_server_clients[:] = rs_clients
     _read_folders_clients[:] = rf_clients
     _write_server_clients[:] = ws_clients
+    _replace_read_folder_sources(rf_clients)
 
 
 """
@@ -175,17 +192,26 @@ _written_buffers = set()
 
 
 async def get_buffer(checksum: Checksum) -> Buffer | None:
-    """Retrieve the buffer from remote sources.
-    First all buffer read folders are queried.
-    Then all buffer read servers are queried."""
+    """Retrieve a local buffer source first, then the configured read servers."""
+    return await _get_buffer_with_pending(checksum, include_local_sources=True)
+
+
+async def get_server_buffer(checksum: Checksum) -> Buffer | None:
+    """Retrieve from read servers after the caller has checked local sources."""
+    return await _get_buffer_with_pending(checksum, include_local_sources=False)
+
+
+async def _get_buffer_with_pending(checksum: Checksum, *, include_local_sources):
 
     checksum = Checksum(checksum)
 
     loop = asyncio.get_running_loop()
-    key = (loop, checksum)
+    key = (loop, checksum, include_local_sources)
     pending = _pending_buffer_fetches.get(key)
     if pending is None:
-        task = loop.create_task(_get_buffer(checksum))
+        task = loop.create_task(
+            _get_buffer(checksum, include_local_sources=include_local_sources)
+        )
 
         def finished(fetch):
             current = _pending_buffer_fetches.get(key)
@@ -210,18 +236,23 @@ async def get_buffer(checksum: Checksum) -> Buffer | None:
         current = _pending_buffer_fetches.get(key)
         if current is not None and current[0] is task:
             remaining = current[1] - 1
-            if remaining == 0 and not task.done():
+            if remaining == 0:
                 _pending_buffer_fetches.pop(key, None)
-                task.cancel()
+                if not task.done():
+                    task.cancel()
             else:
                 _pending_buffer_fetches[key] = (task, remaining)
 
 
-async def _get_buffer(checksum: Checksum) -> Buffer | None:
-    for client in _read_folders_clients:
-        buf = await client.get_file_buffer(checksum)
-        if buf is not None:
-            return buf
+async def _get_buffer(
+    checksum: Checksum, *, include_local_sources=True
+) -> Buffer | None:
+    if include_local_sources:
+        from seamless.caching.buffer_source import get_buffer_source_async
+
+        buffer = await get_buffer_source_async(checksum)
+        if buffer is not None:
+            return buffer
 
     for client in _read_server_clients:
         buf = await client.get(checksum)
@@ -265,20 +296,25 @@ async def has_buffers(checksums: list[Checksum]) -> list[bool]:
 
 
 async def get_buffer_lengths(checksums: list[Checksum]) -> list[int | None]:
-    """Retrieve buffer lengths from remote sources.
-    First all buffer read folders are queried.
-    Then all buffer read servers are queried."""
+    """Retrieve lengths from local sources, then from configured read servers."""
 
     checksums = list(checksums)
     if not checksums:
         return []
 
-    results: list[int | None] = [None] * len(checksums)
+    from seamless.caching.buffer_source import get_buffer_source_lengths
+
+    results = await asyncio.to_thread(
+        get_buffer_source_lengths,
+        [Checksum(checksum) for checksum in checksums],
+    )
     pending: list[tuple[int, Checksum]] = []
     for idx, checksum in enumerate(checksums):
         checksum = Checksum(checksum)
         if not checksum:
             results[idx] = None
+            continue
+        if results[idx] is not None:
             continue
         pending.append((idx, checksum))
 
@@ -294,14 +330,6 @@ async def get_buffer_lengths(checksums: list[Checksum]) -> list[int | None]:
             else:
                 new_pending.append((idx, _checksum))
         return new_pending
-
-    for client in _read_folders_clients:
-        if not pending:
-            return results
-        try:
-            pending = await _update_from_client(client, pending)
-        except Exception:
-            continue
 
     for client in _read_server_clients:
         if not pending:
