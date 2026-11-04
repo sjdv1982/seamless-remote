@@ -69,6 +69,23 @@ def evaluate(spec, execution='auto'):
     return asyncio.run(joins.evaluate_celljoin_placed(spec, execution=execution))
 
 
+async def _wait_for_member(key, member_id, timeout=5):
+    """Wait until member_id has joined the active member set for key.
+
+    Joining is preceded by placement checks whose number of event-loop turns
+    is not part of the contract, so wait for the join itself.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        active = expressions._active_expressions.get(key)
+        if active is not None and member_id in active.members:
+            return active
+        if loop.time() > deadline:
+            raise AssertionError(f"member {member_id!r} did not join {key!r}")
+        await asyncio.sleep(0)
+
+
 def has_calls(calls):
     return [call for call in calls if isinstance(call, tuple) and call[0] == 'has']
 
@@ -218,9 +235,9 @@ def test_shared_remote_members_hold_claims_and_strongest_scratch(monkeypatch):
         first = asyncio.create_task(joins.evaluate_celljoin_placed(spec, member_id=101, scratch=True))
         await asyncio.wait_for(writing.wait(), 5)
         second = asyncio.create_task(joins.evaluate_celljoin_placed(spec, member_id=202, scratch=False))
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        active = expressions._active_expressions[joins.celljoin_cache_key(spec.checksum, spec.celltype)]
+        active = await _wait_for_member(
+            joins.celljoin_cache_key(spec.checksum, spec.celltype), 202
+        )
         expected = set(joins.required_buffers(spec)) | {spec.checksum}
         assert {cs for cs, role in active._refheld_checksums()} == expected
         assert observations == []
@@ -264,9 +281,7 @@ def test_last_remote_member_lingers_and_rejoins_single_dispatch(monkeypatch):
         assert key not in expressions._active_expressions
         assert expressions._lingering_expressions[key] is active
         second = asyncio.create_task(joins.evaluate_celljoin_placed(spec, member_id=302))
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        assert expressions._active_expressions[key] is active
+        assert await _wait_for_member(key, 302) is active
         assert len(dispatches) == 1
         release.set()
         assert await second == Checksum('ce' * 32)
