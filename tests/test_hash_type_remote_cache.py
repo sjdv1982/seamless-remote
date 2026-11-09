@@ -127,6 +127,7 @@ def test_write_through_does_not_wait_for_database(monkeypatch):
         return True
 
     buffer_writer.flush()
+    monkeypatch.setattr(database_remote, "has_write_server", lambda: True)
     monkeypatch.setattr(database_remote, "set_hash_type", write)
     checksum = Checksum("9" * 64)
     word = pack(Kind.JSON_STRING, Length.SHORT)
