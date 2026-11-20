@@ -588,3 +588,30 @@ def inspect_launched_clients(_launcher_cache, _launched_clients):
             }
         )
     return result
+
+
+_launch_locks: dict[Any, threading.Lock] = {}
+_launch_locks_guard = threading.Lock()
+
+
+def launch_once(cache, key, conf, announce: str):
+    """Return the launcher payload for ``conf``, launching its server once.
+
+    Launched clients initialize lazily, in whichever thread uses them first: the
+    main thread, the buffer writer, an event-loop thread. Without a lock per
+    configuration, two of them can both miss ``cache`` and run the launcher for
+    the same service at once, and the two launches then race on its status file.
+    """
+    import sys
+
+    import remote_http_launcher
+
+    with _launch_locks_guard:
+        lock = _launch_locks.setdefault(key, threading.Lock())
+    with lock:
+        payload = cache.get(key)
+        if payload is None:
+            print(announce, file=sys.stderr)
+            payload = remote_http_launcher.run(conf)
+            cache[key] = payload
+    return payload

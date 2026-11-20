@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-import sys
 from typing import Any, Dict
 
 from frozendict import frozendict
 
-from seamless.util.pylru import lrucache
+# Import from the package, not from seamless.util.pylru: a thread that imports
+# the submodule first holds its import lock while it waits for seamless.util,
+# which deadlocks against a thread that is importing seamless.util itself.
+from seamless.util import lrucache
+
+from .client import launch_once
 
 DISABLED = False  # to disable automatic activation during tests
 
@@ -94,16 +98,11 @@ class DaskserverLaunchedHandle:
         self.interactive = _parse_interactive(file_params.get("interactive"))
 
     def _do_init(self) -> None:
-        import remote_http_launcher
-
         conf = self.launch_config
         assert conf.get("conda") is not None
-        frozenconf = _freeze_mapping(conf)
-        payload = _launcher_cache.get(frozenconf)
-        if payload is None:
-            print("Launch daskserver...", file=sys.stderr)
-            payload = remote_http_launcher.run(conf)
-            _launcher_cache[frozenconf] = payload
+        payload = launch_once(
+            _launcher_cache, _freeze_mapping(conf), conf, "Launch daskserver..."
+        )
 
         self.launch_payload = payload
         hostname = payload.get("hostname", "localhost")
