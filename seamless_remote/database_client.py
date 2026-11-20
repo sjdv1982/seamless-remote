@@ -3,14 +3,16 @@
 import asyncio
 import json
 import os
-import sys
 from aiohttp import ClientConnectionError
 from frozendict import frozendict
 
 from seamless import Checksum
-from seamless.util.pylru import lrucache
+# Import from the package, not from seamless.util.pylru: a thread that imports
+# the submodule first holds its import lock while it waits for seamless.util,
+# which deadlocks against a thread that is importing seamless.util itself.
+from seamless.util import lrucache
 
-from .client import Client, _retry_operation, close_all_clients
+from .client import Client, _retry_operation, close_all_clients, launch_once
 
 
 class TransformationResultConflict(Exception):
@@ -741,16 +743,11 @@ class DatabaseLaunchedClient(DatabaseClient):
         )
 
     def _do_init(self):
-        import remote_http_launcher
-
         conf = self.launch_config
 
-        frozenconf = frozendict(conf)
-        server_config = _launcher_cache.get(frozenconf)
-        if server_config is None:
-            print("Launch database server...", file=sys.stderr)
-            server_config = remote_http_launcher.run(conf)
-            _launcher_cache[frozenconf] = server_config
+        server_config = launch_once(
+            _launcher_cache, frozendict(conf), conf, "Launch database server..."
+        )
         hostname = server_config["hostname"]
         port = server_config["port"]
         url = f"http://{hostname}:{port}"

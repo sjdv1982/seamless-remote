@@ -93,6 +93,7 @@ _seamless.ensure_open = lambda *args, **kwargs: None
 _seamless_error_envelope.envelope_to_error = _envelope_to_error
 _seamless_pylru.lrucache = lambda size: {}
 _seamless_util.pylru = _seamless_pylru
+_seamless_util.lrucache = _seamless_pylru.lrucache
 _seamless.util = _seamless_util
 sys.modules["seamless"] = _seamless
 sys.modules["seamless.util"] = _seamless_util

@@ -122,6 +122,7 @@ _seamless_pylru.lrucache = lambda size: {}
 _seamless.checksum = _seamless_checksum
 _seamless_checksum.hash_type = _seamless_hash_type
 _seamless_util.pylru = _seamless_pylru
+_seamless_util.lrucache = _seamless_pylru.lrucache
 _seamless.util = _seamless_util
 sys.modules["seamless"] = _seamless
 sys.modules["seamless.checksum"] = _seamless_checksum

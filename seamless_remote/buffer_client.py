@@ -14,12 +14,16 @@ from aiohttp import ClientConnectionError, ClientPayloadError
 from frozendict import frozendict
 
 from seamless import Buffer, Checksum
-from seamless.util.pylru import lrucache
+# Import from the package, not from seamless.util.pylru: a thread that imports
+# the submodule first holds its import lock while it waits for seamless.util,
+# which deadlocks against a thread that is importing seamless.util itself.
+from seamless.util import lrucache
 
 from .client import (
     Client,
     _retry_operation,
     close_all_clients as _close_all_base_clients,
+    launch_once,
 )
 
 
@@ -339,19 +343,14 @@ class BufferLaunchedClient(BufferClient):
             self.directory = None
 
     def _do_init(self):
-        import remote_http_launcher
-
         conf = self.launch_config
         directory = None
         if self.local:
             directory = pathlib.Path(conf["workdir"]).expanduser().as_posix()
 
-        frozenconf = frozendict(conf)
-        server_config = _launcher_cache.get(frozenconf)
-        if server_config is None:
-            print("Launch hashserver...", file=sys.stderr)
-            server_config = remote_http_launcher.run(conf)
-            _launcher_cache[frozenconf] = server_config
+        server_config = launch_once(
+            _launcher_cache, frozendict(conf), conf, "Launch hashserver..."
+        )
         hostname = server_config["hostname"]
         port = server_config["port"]
         url = f"http://{hostname}:{port}"
